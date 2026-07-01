@@ -19,7 +19,7 @@
 	"scripts": {
 		"clean": "shx rm -rf dist",
 		"dev": "tsgo -p tsconfig.build.json --watch --preserveWatchOutput",
-		"build": "tsgo -p tsconfig.build.json && shx chmod +x dist/cli.js",
+		"build": "tsgo -p tsconfig.build.json \u0026\u0026 shx chmod +x dist/cli.js",
 		"prepublishOnly": "npm run clean && npm run build"
 	},
 	"keywords": [

@@ -1,17 +1,18 @@
 {
-	"name": "piclaw",
-	"version": "0.1.0",
-	"private": true,
-	"type": "module",
-	"workspaces": [
-		"packages/*",
-		"web"
-	],
-	"scripts": {
-		"dev": "cd web && next dev -p 3030",
-		"build": "npm run build --workspaces --if-present",
-		"build:web": "cd web && next build",
-		"start": "cd web && next start -p 30142",
-		"clean": "npm run clean --workspaces --if-present"
-	}
+  "name": "piclaw",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": ["packages/*", "web"],
+  "scripts": {
+    "dev": "cd web && next dev -p 3030",
+    "build": "npm run build --workspaces --if-present",
+    "build:web": "cd web && next build",
+    "start": "cd web && next start -p 30142",
+    "clean": "npm run clean --workspaces --if-present"
+  },
+  "devDependencies": {
+    "@typescript/native-preview": "7.0.0-dev.20260120.1",
+    "shx": "0.4.0"
+  }
 }
