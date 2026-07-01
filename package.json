@@ -11,6 +11,7 @@
 		"dev": "cd web && next dev -p 3030",
 		"build": "npm run build --workspaces --if-present",
 		"build:web": "cd web && next build",
+		"start": "cd web && next start -p 30142",
 		"clean": "npm run clean --workspaces --if-present"
 	}
 }

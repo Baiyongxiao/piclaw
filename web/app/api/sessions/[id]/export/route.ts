@@ -35,8 +35,8 @@ async function getPiCliPath(): Promise<string> {
   return join(
     process.cwd(),
     "node_modules",
-    "@earendil-works",
-    "pi-coding-agent",
+    "@piclaw",
+    "coding-agent",
     "dist",
     "cli.js"
   );
