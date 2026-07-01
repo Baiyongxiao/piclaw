@@ -120,10 +120,9 @@ export type SessionListProgress = (loaded: number, total: number) => void;
  * Abstract storage backend for session persistence.
  *
  * Implementations:
- * - `FileSystemStore` — stores each session as a `.jsonl` file (the default)
- * - `SqliteStore` — stores all sessions in a single SQLite database with FTS5
+ * - `SqliteStore` — stores all sessions in a single SQLite database with FTS5 (default)
  *
- * SessionManager delegates all file I/O operations to this interface,
+ * SessionManager delegates all I/O operations to this interface,
  * keeping only in-memory state management (tree index, leaf pointer, labels).
  */
 export interface SessionStore {

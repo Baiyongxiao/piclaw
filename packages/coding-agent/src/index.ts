@@ -248,10 +248,6 @@ export {
 	type CustomMessageEntry as SessionStoreCustomMessageEntry,
 } from "./core/session-store.ts";
 export {
-	// SessionStore implementations
-	FileSystemStore,
-} from "./core/session-store-fs.ts";
-export {
 	SqliteStore,
 } from "./core/session-store-sqlite.ts";
 export {

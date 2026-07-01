@@ -13,7 +13,7 @@ import {
 	createCustomMessage,
 } from "./messages.ts";
 import type { SessionStore } from "./session-store.ts";
-import { FileSystemStore } from "./session-store-fs.ts";
+import { SqliteStore } from "./session-store-sqlite.ts";
 
 export const CURRENT_SESSION_VERSION = 3;
 
@@ -422,33 +422,33 @@ export function buildSessionContext(
 
 /**
  * Get the default session directory for a cwd.
- * Delegates to the default FileSystemStore.
+ * Delegates to the default SqliteStore.
  */
 export function getDefaultSessionDir(cwd: string, agentDir: string = getDefaultAgentDir()): string {
-	return new FileSystemStore().getDefaultSessionDir(cwd, agentDir);
+	return new SqliteStore().getDefaultSessionDir(cwd, agentDir);
 }
 
 /**
- * Exported for testing — load entries from a .jsonl file path.
- * Uses the default FileSystemStore.
+ * Exported for testing — load entries from a session.
+ * Uses the default SqliteStore.
  */
 export function loadEntriesFromFile(filePath: string): FileEntry[] {
-	return new FileSystemStore().loadEntries(filePath);
+	return new SqliteStore().loadEntries(filePath);
 }
 
 /**
- * Exported for testing — find most recent session in a directory.
- * Uses the default FileSystemStore.
+ * Exported for testing — find most recent session.
+ * Uses the default SqliteStore.
  */
 export function findMostRecentSession(sessionDir: string, cwd?: string): string | null {
-	return new FileSystemStore().findMostRecent(sessionDir, cwd);
+	return new SqliteStore().findMostRecent(sessionDir, cwd);
 }
 
 /** Progress callback for session listing. */
 export type SessionListProgress = (loaded: number, total: number) => void;
 
 /**
- * Manages conversation sessions as append-only trees stored in JSONL files.
+ * Manages conversation sessions as append-only trees stored in SQLite.
  *
  * Each session entry has an id and parentId forming a tree structure. The "leaf"
  * pointer tracks the current position. Appending creates a child of the current leaf.
@@ -1100,39 +1100,35 @@ export class SessionManager {
 	 * @param sessionDir Optional session directory. If omitted, uses default (~/.pi/agent/sessions/<encoded-cwd>/).
 	 */
 	static create(cwd: string, sessionDir?: string, options?: NewSessionOptions): SessionManager {
-		const store = new FileSystemStore();
+		const store = new SqliteStore();
 		const dir = sessionDir ? normalizePath(sessionDir) : store.getDefaultSessionDir(cwd);
 		return new SessionManager(store, cwd, dir, undefined, true, options);
 	}
 
 	/**
-	 * Open a specific session file.
-	 * @param path Path to session file
-	 * @param sessionDir Optional session directory for /new or /branch. If omitted, derives from file's parent.
+	 * Open a specific session.
+	 * @param path Session id or file path to session
+	 * @param sessionDir Optional session directory for /new or /branch.
 	 * @param cwdOverride Optional cwd override instead of the session header cwd.
 	 */
 	static open(path: string, sessionDir?: string, cwdOverride?: string): SessionManager {
-		const resolvedPath = resolvePath(path);
-		// Extract cwd from session header if possible, otherwise use process.cwd()
-		const store = new FileSystemStore();
-		const entries = store.loadEntries(resolvedPath);
+		const store = new SqliteStore();
+		const entries = store.loadEntries(path);
 		const header = entries.find((e) => e.type === "session") as SessionHeader | undefined;
 		const cwd = cwdOverride ?? header?.cwd ?? process.cwd();
-		// If no sessionDir provided, derive from file's parent directory
-		const dir = sessionDir ? normalizePath(sessionDir) : join(resolvedPath, "..");
-		return new SessionManager(store, cwd, dir, resolvedPath, true);
+		const dir = sessionDir ? normalizePath(sessionDir) : store.getDefaultSessionDir(cwd);
+		return new SessionManager(store, cwd, dir, path, true);
 	}
 
 	/**
 	 * Continue the most recent session, or create new if none.
 	 * @param cwd Working directory
-	 * @param sessionDir Optional session directory. If omitted, uses default (~/.pi/agent/sessions/<encoded-cwd>/).
+	 * @param sessionDir Optional session directory.
 	 */
 	static continueRecent(cwd: string, sessionDir?: string): SessionManager {
-		const store = new FileSystemStore();
+		const store = new SqliteStore();
 		const dir = sessionDir ? normalizePath(sessionDir) : store.getDefaultSessionDir(cwd);
-		const filterCwd = sessionDir !== undefined;
-		const mostRecent = store.findMostRecent(dir, filterCwd ? cwd : undefined);
+		const mostRecent = store.findMostRecent(dir, cwd);
 		if (mostRecent) {
 			return new SessionManager(store, cwd, dir, mostRecent, true);
 		}
@@ -1141,13 +1137,13 @@ export class SessionManager {
 
 	/** Create an in-memory session (no file persistence) */
 	static inMemory(cwd: string = process.cwd(), options?: NewSessionOptions): SessionManager {
-		const store = new FileSystemStore();
+		const store = new SqliteStore();
 		return new SessionManager(store, cwd, "", undefined, false, options);
 	}
 
 	/**
 	 * Create a session with a custom store.
-	 * Use this to plug in alternative storage backends (e.g., SQLite, in-memory).
+	 * Use this to plug in alternative storage backends.
 	 */
 	static withStore(store: SessionStore, cwd: string, sessionDir?: string, options?: NewSessionOptions): SessionManager {
 		const dir = sessionDir ? normalizePath(sessionDir) : store.getDefaultSessionDir(cwd);
@@ -1157,9 +1153,9 @@ export class SessionManager {
 	/**
 	 * Fork a session from another project directory into the current project.
 	 * Creates a new session in the target cwd with the full history from the source session.
-	 * @param sourcePath Path to the source session file
+	 * @param sourcePath Path or id of the source session
 	 * @param targetCwd Target working directory (where the new session will be stored)
-	 * @param sessionDir Optional session directory. If omitted, uses default for targetCwd.
+	 * @param sessionDir Optional session directory.
 	 */
 	static forkFrom(
 		sourcePath: string,
@@ -1167,29 +1163,29 @@ export class SessionManager {
 		sessionDir?: string,
 		options?: NewSessionOptions,
 	): SessionManager {
-		const store = new FileSystemStore();
-		const resolvedSourcePath = resolvePath(sourcePath);
+		const store = new SqliteStore();
 		const resolvedTargetCwd = resolvePath(targetCwd);
-		const sourceEntries = store.loadEntries(resolvedSourcePath);
+		const sourceEntries = store.loadEntries(sourcePath);
 		if (sourceEntries.length === 0) {
-			throw new Error(`Cannot fork: source session file is empty or invalid: ${resolvedSourcePath}`);
+			throw new Error(`Cannot fork: source session is empty or invalid: ${sourcePath}`);
 		}
 
 		const sourceHeader = sourceEntries.find((e) => e.type === "session") as SessionHeader | undefined;
 		if (!sourceHeader) {
-			throw new Error(`Cannot fork: source session has no header: ${resolvedSourcePath}`);
+			throw new Error(`Cannot fork: source session has no header: ${sourcePath}`);
 		}
 
 		const dir = sessionDir ? normalizePath(sessionDir) : store.getDefaultSessionDir(resolvedTargetCwd);
 
-		// Create new session file with new ID but forked content
+		// Create new session with new ID but forked content
 		if (options?.id !== undefined) {
 			assertValidSessionId(options.id);
 		}
 		const newSessionId = options?.id ?? createSessionId();
 		const timestamp = new Date().toISOString();
-		const fileTimestamp = timestamp.replace(/[:.]/g, "-");
-		const newSessionFile = join(dir, `${fileTimestamp}_${newSessionId}.jsonl`);
+
+		// Use session id as the "session file" identifier
+		const newSessionFile = newSessionId;
 
 		// Write new header pointing to source as parent, with updated cwd
 		const newHeader: SessionHeader = {
@@ -1198,7 +1194,7 @@ export class SessionManager {
 			id: newSessionId,
 			timestamp,
 			cwd: resolvedTargetCwd,
-			parentSession: resolvedSourcePath,
+			parentSession: sourcePath,
 		};
 		store.createSessionFile(newSessionFile, newHeader);
 
@@ -1215,11 +1211,11 @@ export class SessionManager {
 	/**
 	 * List all sessions for a directory.
 	 * @param cwd Working directory (used to compute default session directory)
-	 * @param sessionDir Optional session directory. If omitted, uses default (~/.pi/agent/sessions/<encoded-cwd>/).
+	 * @param sessionDir Optional session directory.
 	 * @param onProgress Optional callback for progress updates (loaded, total)
 	 */
 	static async list(cwd: string, sessionDir?: string, onProgress?: SessionListProgress): Promise<SessionInfo[]> {
-		const store = new FileSystemStore();
+		const store = new SqliteStore();
 		const dir = sessionDir ? normalizePath(sessionDir) : store.getDefaultSessionDir(cwd);
 		const resolvedCwd = resolvePath(cwd);
 		const sessions = (await store.listSessions(dir, onProgress)).filter(
@@ -1239,7 +1235,7 @@ export class SessionManager {
 		sessionDirOrOnProgress?: string | SessionListProgress,
 		onProgress?: SessionListProgress,
 	): Promise<SessionInfo[]> {
-		const store = new FileSystemStore();
+		const store = new SqliteStore();
 		return store.listAllSessions(
 			typeof sessionDirOrOnProgress === "string" ? sessionDirOrOnProgress : undefined,
 			typeof sessionDirOrOnProgress === "function" ? sessionDirOrOnProgress : onProgress,
