@@ -1,0 +1,27 @@
+{
+	"extends": "./tsconfig.base.json",
+	"compilerOptions": {
+		"noEmit": true,
+		"paths": {
+			"*": ["./*"],
+			"@piclaw/ai": ["./packages/ai/src/index.ts"],
+			"@piclaw/ai/oauth": ["./packages/ai/src/oauth.ts"],
+			"@piclaw/ai/*": ["./packages/ai/src/*.ts", "./packages/ai/src/providers/*.ts"],
+			"@piclaw/ai/dist/*": ["./packages/ai/src/*"],
+			"@piclaw/agent-core": ["./packages/agent/src/index.ts"],
+			"@piclaw/agent-core/*": ["./packages/agent/src/*"],
+			"@piclaw/coding-agent": ["./packages/coding-agent/src/index.ts"],
+			"@piclaw/coding-agent/hooks": ["./packages/coding-agent/src/core/hooks/index.ts"],
+			"@piclaw/coding-agent/*": ["./packages/coding-agent/src/*"],
+			"@earendil-works/pi-orchestrator": ["./packages/orchestrator/src/index.ts"],
+			"@earendil-works/pi-orchestrator/*": ["./packages/orchestrator/src/*"],
+			"typebox": ["./node_modules/typebox"],
+			"@piclaw/tui": ["./packages/tui/src/index.ts"],
+			"@piclaw/tui/*": ["./packages/tui/src/*"],
+			"@earendil-works/pi-agent-old": ["./packages/agent-old/src/index.ts"],
+			"@earendil-works/pi-agent-old/*": ["./packages/agent-old/src/*"]
+		}
+	},
+	"include": ["packages/*/src/**/*", "packages/*/test/**/*", "packages/coding-agent/examples/**/*"],
+	"exclude": ["**/dist/**", "packages/coding-agent/examples/extensions/gondolin/**"]
+}
