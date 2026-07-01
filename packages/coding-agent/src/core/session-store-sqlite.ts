@@ -181,17 +181,14 @@ export class SqliteStore implements SessionStore {
 	rewriteFile(sessionFile: string, entries: FileEntry[]): void {
 		const sessionId = pathToSessionId(sessionFile);
 		const tx = this.db.transaction(() => {
-			this.db.prepare("DELETE FROM entries WHERE session_id = ?").run(sessionId);
-
-			// Update header info from the first entry if it's a session header
+			// Ensure the session row exists with correct cwd BEFORE deleting entries
+			// (insertEntry creates it with empty cwd if missing, so we upsert first)
 			const header = entries.find((e): e is SessionHeader => e.type === "session");
 			if (header) {
-				this.db
-					.prepare(
-						"UPDATE sessions SET cwd = ?, parent_session = ?, modified_at = ? WHERE id = ?",
-					)
-					.run(header.cwd ?? "", header.parentSession ?? null, new Date().toISOString(), sessionId);
+				this.upsertSession(header);
 			}
+
+			this.db.prepare("DELETE FROM entries WHERE session_id = ?").run(sessionId);
 
 			for (const entry of entries) {
 				if (entry.type === "session") continue;
