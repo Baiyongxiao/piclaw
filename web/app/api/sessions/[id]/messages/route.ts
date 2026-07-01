@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SessionManager } from "@piclaw/coding-agent";
 import { resolveSessionPath, buildSessionContext } from "@/lib/session-reader";
+import { MESSAGE_PAGE_SIZE } from "@/lib/constants";
 
-const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
 
 /** Parse and clamp a limit query param; falls back to default if invalid. */
@@ -52,7 +52,7 @@ export async function GET(
   const searchParams = req.nextUrl.searchParams;
   const beforeEntryId = searchParams.get("beforeEntryId");
   const limitStr = searchParams.get("limit");
-  const limit = parseLimitParam(limitStr, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
+  const limit = parseLimitParam(limitStr, MESSAGE_PAGE_SIZE, MAX_PAGE_SIZE);
 
   try {
     const filePath = await resolveSessionPath(id);

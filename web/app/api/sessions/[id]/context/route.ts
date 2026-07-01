@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import { SessionManager } from "@piclaw/coding-agent";
 import { resolveSessionPath, buildSessionContext } from "@/lib/session-reader";
-
-const INITIAL_PAGE_SIZE = 20;
+import { MESSAGE_PAGE_SIZE } from "@/lib/constants";
 
 function sliceContextMessages(
   fullMessages: readonly { role: string }[],
@@ -43,7 +42,7 @@ export async function GET(
     const sm = SessionManager.open(filePath);
     const context = buildSessionContext(sm.getEntries() as never, leafId);
 
-    const paginated = sliceContextMessages(context.messages, context.entryIds, INITIAL_PAGE_SIZE);
+    const paginated = sliceContextMessages(context.messages, context.entryIds, MESSAGE_PAGE_SIZE);
 
     return NextResponse.json({
       context: {

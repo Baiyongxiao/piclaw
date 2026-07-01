@@ -9,12 +9,10 @@ import {
   listAllSessions,
 } from "@/lib/session-reader";
 import { getRpcSession } from "@/lib/rpc-manager";
+import { MESSAGE_PAGE_SIZE } from "@/lib/constants";
 
 // BranchNavigator still traverses recursively, so keep the response tree shallow.
 const MAX_PROJECTED_TREE_DEPTH = 200;
-
-/** Default number of messages to return in a paginated response */
-const INITIAL_PAGE_SIZE = 20;
 
 /**
  * Slice context messages to a page at the end (most recent messages).
@@ -200,7 +198,7 @@ export async function GET(
           totalMessageCount: context.messages.length,
           oldestLoadedEntryId: context.entryIds[0] ?? null,
         }
-      : sliceContextMessages(context.messages, context.entryIds, INITIAL_PAGE_SIZE);
+      : sliceContextMessages(context.messages, context.entryIds, MESSAGE_PAGE_SIZE);
 
     return NextResponse.json({
       sessionId: id,

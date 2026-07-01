@@ -4,6 +4,7 @@ import { useState, useCallback, useRef, useEffect, useLayoutEffect, useReducer }
 import type { AgentMessage, SessionInfo, SessionTreeNode, AgentMode } from "@/lib/types";
 import { normalizeToolCalls } from "@/lib/normalize";
 import { sendAgentCommand } from "@/lib/agent-client";
+import { MESSAGE_PAGE_SIZE } from "@/lib/constants";
 
 export interface SessionData {
   sessionId: string;
@@ -273,7 +274,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     loadingMoreRef.current = true;
     setLoadingMore(true);
     try {
-      const url = `/api/sessions/${encodeURIComponent(sid)}/messages?beforeEntryId=${encodeURIComponent(beforeEntryId)}&limit=20`;
+      const url = `/api/sessions/${encodeURIComponent(sid)}/messages?beforeEntryId=${encodeURIComponent(beforeEntryId)}&limit=${MESSAGE_PAGE_SIZE}`;
       const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const d = await res.json() as { messages: AgentMessage[]; entryIds: string[]; hasMore: boolean; nextCursor: string | null };
