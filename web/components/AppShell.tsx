@@ -30,6 +30,7 @@ export function AppShell() {
   const [skillsConfigOpen, setSkillsConfigOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarInit, setSidebarInit] = useState(false);
+  const [pendingNavigateEntryId, setPendingNavigateEntryId] = useState<string | null>(() => searchParams.get("entry"));
 
   // On desktop default open; on mobile default closed
   useEffect(() => {
@@ -258,6 +259,9 @@ export function AppShell() {
         onOpenFile={handleOpenFile}
         explorerRefreshKey={explorerRefreshKey}
         onAtMention={handleAtMention}
+        onNavigateToEntry={(sessionId, entryId) => {
+          setPendingNavigateEntryId(entryId);
+        }}
       />
       <div style={{ padding: "8px", flexShrink: 0, display: "flex", justifyContent: "space-between", gap: 4 }}>
         {([
@@ -650,6 +654,8 @@ export function AppShell() {
               onSystemPromptChange={handleSystemPromptChange}
               onSessionStatsChange={handleSessionStatsChange}
               onContextUsageChange={handleContextUsageChange}
+              navigateToEntryId={pendingNavigateEntryId}
+              onNavigateEntryConsumed={() => setPendingNavigateEntryId(null)}
             />
           ) : showPlaceholder ? (
             activeCwd ? (

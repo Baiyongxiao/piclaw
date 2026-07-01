@@ -13,6 +13,35 @@ import { getRpcSession } from "@/lib/rpc-manager";
 // BranchNavigator still traverses recursively, so keep the response tree shallow.
 const MAX_PROJECTED_TREE_DEPTH = 200;
 
+/** Default number of messages to return in a paginated response */
+const INITIAL_PAGE_SIZE = 20;
+
+/**
+ * Slice context messages to a page at the end (most recent messages).
+ * Returns the sliced context plus metadata for pagination.
+ */
+function sliceContextMessages(
+  fullMessages: readonly { role: string }[],
+  fullEntryIds: readonly string[],
+  size: number,
+) {
+  const total = fullMessages.length;
+  if (total <= size) {
+    return {
+      messages: fullMessages,
+      entryIds: fullEntryIds,
+      totalMessageCount: total,
+      oldestLoadedEntryId: fullEntryIds[0] ?? null,
+    };
+  }
+  return {
+    messages: fullMessages.slice(-size),
+    entryIds: fullEntryIds.slice(-size),
+    totalMessageCount: total,
+    oldestLoadedEntryId: fullEntryIds[total - size] ?? null,
+  };
+}
+
 /**
  * Project the session tree into the shallow navigation tree sent to the client.
  * Keeps roots, branch points, and leaves while contracting single-child chains
@@ -162,13 +191,30 @@ export async function GET(
       }
     }
 
+    const isFull = url.searchParams.has("full");
+
+    const paginated = isFull
+      ? {
+          messages: context.messages,
+          entryIds: context.entryIds,
+          totalMessageCount: context.messages.length,
+          oldestLoadedEntryId: context.entryIds[0] ?? null,
+        }
+      : sliceContextMessages(context.messages, context.entryIds, INITIAL_PAGE_SIZE);
+
     return NextResponse.json({
       sessionId: id,
       filePath,
       info,
       leafId,
       tree,
-      context,
+      context: {
+        ...context,
+        messages: paginated.messages,
+        entryIds: paginated.entryIds,
+      },
+      totalMessageCount: paginated.totalMessageCount,
+      oldestLoadedEntryId: paginated.oldestLoadedEntryId,
       ...(agentState !== undefined ? { agentState } : {}),
     });
   } catch (error) {

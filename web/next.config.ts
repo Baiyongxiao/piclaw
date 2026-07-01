@@ -11,12 +11,11 @@ try {
 
 const nextConfig: NextConfig = {
   transpilePackages: [
-    "@piclaw/coding-agent",
     "@piclaw/ai",
     "@piclaw/agent-core",
     "@piclaw/tui",
   ],
-  serverExternalPackages: ["better-sqlite3", "@piclaw/coding-agent"],
+  serverExternalPackages: ["better-sqlite3"],
   env: {
     NEXT_PUBLIC_APP_VERSION: version,
     NEXT_PUBLIC_PI_VERSION: piVersion,

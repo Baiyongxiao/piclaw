@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect, useReducer } from "react";
+import { useState, useCallback, useRef, useEffect, useLayoutEffect, useReducer } from "react";
 import type { AgentMessage, SessionInfo, SessionTreeNode, AgentMode } from "@/lib/types";
 import { normalizeToolCalls } from "@/lib/normalize";
 import { sendAgentCommand } from "@/lib/agent-client";
@@ -16,6 +16,8 @@ export interface SessionData {
     thinkingLevel: string;
     model: { provider: string; modelId: string } | null;
   };
+  totalMessageCount?: number;
+  oldestLoadedEntryId?: string | null;
 }
 
 interface StreamingState {
@@ -147,6 +149,16 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [compactResult, setCompactResult] = useState<CompactResultInfo | null>(null);
   const [agentPhase, setAgentPhase] = useState<AgentPhase>(null);
 
+  // Pagination state for message history
+  const [totalMessageCount, setTotalMessageCount] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMoreMessages, setHasMoreMessages] = useState(false);
+  const loadingMoreRef = useRef(false);
+  /** Set before prepending messages to prevent auto-scroll from firing on the next render */
+  const pendingPrependRef = useRef(false);
+  /** Height of the scroll container before prepending, used to restore scroll position */
+  const prevScrollHeightRef = useRef(0);
+
   const eventSourceRef = useRef<EventSource | null>(null);
   const sessionIdRef = useRef<string | null>(session?.id ?? null);
   const agentRunningRef = useRef(false);
@@ -187,8 +199,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const loadSession = useCallback(async (sid: string, showLoading = false, includeState = false) => {
     try {
       if (showLoading) setLoading(true);
-      const url = includeState
-        ? `/api/sessions/${encodeURIComponent(sid)}?includeState`
+      const params = new URLSearchParams();
+      if (includeState) params.set("includeState", "1");
+      // includeState fetches live agent state from the RPC process
+      const qs = params.toString();
+      const url = qs
+        ? `/api/sessions/${encodeURIComponent(sid)}?${qs}`
         : `/api/sessions/${encodeURIComponent(sid)}`;
       const res = await fetch(url);
       if (res.status === 404) {
@@ -196,6 +212,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           setData(null);
           setActiveLeafId(null);
           setMessages([]);
+          setEntryIds([]);
+          setTotalMessageCount(0);
+          setHasMoreMessages(false);
           setError(null);
         }
         return null;
@@ -204,8 +223,14 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       const d = await res.json() as SessionData & { agentState?: { running: boolean; state?: { isStreaming?: boolean; isCompacting?: boolean; mode?: AgentMode; contextUsage?: { percent: number | null; contextWindow: number; tokens: number | null } | null; systemPrompt?: string; thinkingLevel?: string } } };
       setData(d);
       setActiveLeafId(d.leafId);
+      // Replace messages on normal/initial load (but not on background SSE refresh)
       setMessages(d.context.messages);
       setEntryIds(d.context.entryIds ?? []);
+      // Track pagination metadata
+      if (d.totalMessageCount !== undefined) {
+        setTotalMessageCount(d.totalMessageCount);
+        setHasMoreMessages(d.totalMessageCount > d.context.messages.length);
+      }
       setCurrentModelOverride(null);
       setError(null);
       // If no live agent state, fall back to thinking level from session file
@@ -229,11 +254,70 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         : `/api/sessions/${encodeURIComponent(sid)}/context`;
       const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const d = await res.json() as { context: { messages: AgentMessage[]; entryIds: string[] } };
+      const d = await res.json() as { context: { messages: AgentMessage[]; entryIds: string[] }; totalMessageCount?: number };
       setMessages(d.context.messages);
       setEntryIds(d.context.entryIds ?? []);
+      if (d.totalMessageCount !== undefined) {
+        setTotalMessageCount(d.totalMessageCount);
+        setHasMoreMessages(d.totalMessageCount > d.context.messages.length);
+      }
     } catch (e) {
       console.error("Failed to load context:", e);
+    }
+  }, []);
+
+  /** Load older messages (cursor-based pagination). Prepends to existing messages. */
+  const handleLoadMore = useCallback(async (beforeEntryId: string) => {
+    const sid = sessionIdRef.current;
+    if (!sid || loadingMoreRef.current || !hasMoreMessages) return;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    try {
+      const url = `/api/sessions/${encodeURIComponent(sid)}/messages?beforeEntryId=${encodeURIComponent(beforeEntryId)}&limit=20`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const d = await res.json() as { messages: AgentMessage[]; entryIds: string[]; hasMore: boolean; nextCursor: string | null };
+      if (!mountedRef.current) return;
+      if (d.messages.length > 0) {
+        // Save scroll height before prepend so we can restore position after re-render
+        const container = scrollContainerRef.current;
+        if (container) prevScrollHeightRef.current = container.scrollHeight;
+        // Set flag BEFORE setMessages so the scroll effect in the next render
+        // can detect this was a prepend and skip auto-scroll.
+        pendingPrependRef.current = true;
+        // Prepend older messages
+        setMessages((prev) => [...d.messages, ...prev]);
+        setEntryIds((prev) => [...d.entryIds, ...prev]);
+      }
+      setHasMoreMessages(d.hasMore);
+    } catch (e) {
+      console.error("Failed to load more messages:", e);
+    } finally {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    }
+  }, [hasMoreMessages]);
+
+  /** Reload session with full message list (used after compaction / abort). */
+  const loadSessionFull = useCallback(async (sid: string, showLoading = false) => {
+    try {
+      if (showLoading) setLoading(true);
+      const res = await fetch(`/api/sessions/${encodeURIComponent(sid)}?full=1`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const d = await res.json() as SessionData;
+      if (!mountedRef.current) return;
+      setData(d);
+      setActiveLeafId(d.leafId);
+      setMessages(d.context.messages);
+      setEntryIds(d.context.entryIds ?? []);
+      setTotalMessageCount(d.totalMessageCount ?? d.context.messages.length);
+      setHasMoreMessages(false);
+      setCurrentModelOverride(null);
+      setError(null);
+    } catch (e) {
+      if (mountedRef.current) setError(String(e));
+    } finally {
+      if (showLoading) setLoading(false);
     }
   }, []);
 
@@ -301,15 +385,35 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         setRetryInfo(null);
         dispatch({ type: "end" });
         if (sessionIdRef.current) {
-          loadSession(sessionIdRef.current);
-          fetch(`/api/agent/${encodeURIComponent(sessionIdRef.current)}`)
+          // Don't call loadSession() — the streaming infrastructure already appended
+          // the assistant message to `messages` via message_end. Just refresh metadata.
+          const sid = sessionIdRef.current;
+          fetch(`/api/agent/${encodeURIComponent(sid)}`)
             .then((r) => {
               if (!r.ok) throw new Error(`HTTP ${r.status}`);
-              return r.json() as Promise<{ state?: { contextUsage?: { percent: number | null; contextWindow: number; tokens: number | null } | null; systemPrompt?: string } }>;
+              return r.json() as Promise<{ state?: { contextUsage?: { percent: number | null; contextWindow: number; tokens: number | null } | null; systemPrompt?: string; isCompacting?: boolean; mode?: AgentMode; thinkingLevel?: string } }>;
             })
             .then((d) => {
+              if (!mountedRef.current) return;
               if (d.state?.contextUsage !== undefined) setContextUsage(d.state.contextUsage ?? null);
               if (d.state?.systemPrompt !== undefined) setSystemPrompt(d.state.systemPrompt ?? null);
+              if (d.state?.mode) setModeState(d.state.mode);
+              if (d.state?.thinkingLevel) setThinkingLevel(d.state.thinkingLevel as ThinkingLevelOption);
+            })
+            .catch(() => {});
+          // Also update data (tree, leafId) without overwriting messages
+          fetch(`/api/sessions/${encodeURIComponent(sid)}`)
+            .then((r) => {
+              if (!r.ok) return null;
+              return r.json() as Promise<SessionData & { totalMessageCount?: number; oldestLoadedEntryId?: string | null }>;
+            })
+            .then((d) => {
+              if (!d || !mountedRef.current) return;
+              // Update data (tree, leafId) without overwriting messages
+              setData((prev) => prev ? { ...prev, tree: d.tree, leafId: d.leafId, filePath: d.filePath, sessionId: d.sessionId, info: (d as unknown as Record<string, unknown>).info } : prev);
+              if (d.totalMessageCount !== undefined) {
+                setTotalMessageCount(d.totalMessageCount);
+              }
             })
             .catch(() => {});
         }
@@ -376,11 +480,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           setCompactResult(null);
         } else if (!event.aborted) {
           setCompactResult(readCompactResult(event.result, (event.reason as string | undefined) ?? "auto"));
-          if (sessionIdRef.current) loadSession(sessionIdRef.current);
+          // Compaction changes the message structure — reload full context
+          if (sessionIdRef.current) loadSessionFull(sessionIdRef.current);
         }
         break;
     }
-  }, [loadSession, onAgentEnd]);
+  }, [loadSessionFull, onAgentEnd, setModeState]);
   handleAgentEventRef.current = handleAgentEvent;
 
   const handleSend = useCallback(async (message: string, images?: AttachedImage[]) => {
@@ -480,9 +585,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
     // Reload session to get final state after abort
     if (mountedRef.current) {
-      try { loadSession(sid); } catch { /* ignore */ }
+      try { loadSessionFull(sid); } catch { /* ignore */ }
     }
-  }, [loadSession]);
+  }, [loadSessionFull]);
 
   const handleFork = useCallback(async (entryId: string) => {
     const sid = sessionIdRef.current;
@@ -546,14 +651,14 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     try {
       const result = await sendAgentCommand<CompactCommandResult>(sid, { type: "compact" });
       setCompactResult(readCompactResult(result, "manual"));
-      await loadSession(sid, true);
+      await loadSessionFull(sid, true);
     } catch (e) {
       setCompactError(e instanceof Error ? e.message : String(e));
       setCompactResult(null);
     } finally {
       setIsCompacting(false);
     }
-  }, [isCompacting, loadSession]);
+  }, [isCompacting, loadSessionFull]);
 
   const handleSteer = useCallback(async (message: string, images?: AttachedImage[]) => {
     const sid = sessionIdRef.current;
@@ -716,6 +821,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   useEffect(() => {
     if (messages.length > 0) {
+      // If messages were just prepended (pagination), skip all auto-scroll
+      if (pendingPrependRef.current) {
+        pendingPrependRef.current = false;
+        return;
+      }
       if (pendingScrollToUserRef.current) {
         pendingScrollToUserRef.current = false;
         initialScrollDoneRef.current = true;
@@ -728,6 +838,21 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       }
     }
   }, [messages.length, scrollToBottom, scrollUserMsgToTop]);
+
+  // After prepending older messages, restore scroll position so the viewport
+  // doesn't jump to the top of the newly inserted content.
+  useLayoutEffect(() => {
+    if (pendingPrependRef.current && prevScrollHeightRef.current > 0) {
+      const container = scrollContainerRef.current;
+      if (container) {
+        const delta = container.scrollHeight - prevScrollHeightRef.current;
+        if (delta > 0) {
+          container.scrollTop = delta;
+        }
+      }
+      prevScrollHeightRef.current = 0;
+    }
+  });
 
   // Load model list
   useEffect(() => {
@@ -797,7 +922,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
               // Agent stopped but we missed the agent_end event — clean up
               setAgentRunning(false);
               setAgentPhase(null);
-              loadSession(sid);
+              loadSessionFull(sid);
             }
           })
           .catch(() => {});
@@ -831,13 +956,16 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     isAutoModelSelection: isNew && newSessionModel === null,
     agentPhase,
     isNew,
+    // Pagination state
+    totalMessageCount, loadingMore, hasMoreMessages,
     // Refs
     sessionIdRef, eventSourceRef, messagesEndRef, scrollContainerRef,
     lastUserMsgRef, pendingScrollToUserRef, initialScrollDoneRef,
     // Actions
     handleSend, handleAbort, handleFork, handleNavigate, handleModelChange,
     handleCompact, handleSteer, handleFollowUp, handleAbortCompaction,
-    handleModeChange, handleThinkingLevelChange, setActiveLeafId, setData, setMessages,
+    handleModeChange, handleThinkingLevelChange, handleLoadMore,
+    setActiveLeafId, setData, setMessages,
     dispatch, setAgentRunning, setForkingEntryId,
     // Subscriptions
     handleAgentEventRef,

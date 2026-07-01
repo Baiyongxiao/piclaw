@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { completeSimple, type AssistantMessage } from "@piclaw/ai";
+import { completeSimple, type AssistantMessage } from "@piclaw/ai/compat";
 import { AuthStorage, ModelRegistry } from "@piclaw/coding-agent";
 
 export const dynamic = "force-dynamic";

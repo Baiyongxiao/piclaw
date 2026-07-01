@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import type { SessionInfo } from "@/lib/types";
 import { FileExplorer } from "./FileExplorer";
+import { SessionSearch } from "./SessionSearch";
 import { encodeFilePathForApi } from "@/lib/file-paths";
 
 interface Props {
@@ -18,6 +19,7 @@ interface Props {
   onOpenFile?: (filePath: string, fileName: string) => void;
   explorerRefreshKey?: number;
   onAtMention?: (relativePath: string) => void;
+  onNavigateToEntry?: (sessionId: string, entryId: string) => void;
 }
 
 function formatRelativeTime(dateStr: string): string {
@@ -197,7 +199,7 @@ function PiAgentTitle() {
   );
 }
 
-export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onAtMention }: Props) {
+export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onAtMention, onNavigateToEntry }: Props) {
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -893,7 +895,17 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         </div>
       </div>
 
-      {/* Session list */}
+      {/* Session search + list */}
+      <SessionSearch
+        cwd={selectedCwd}
+        onNavigateToEntry={(sessionId, entryId) => {
+          const session = allSessions.find((s) => s.id === sessionId);
+          if (session) {
+            onSelectSession(session);
+            onNavigateToEntry?.(sessionId, entryId);
+          }
+        }}
+      />
       <div style={{ flex: explorerOpen && (selectedCwdProp || selectedCwd) ? "1 1 0" : "1 1 auto", overflowY: "auto", padding: "0", minHeight: 80 }}>
         {loading && (
           <div style={{ padding: "16px 14px", color: "var(--text-muted)", fontSize: 12 }}>

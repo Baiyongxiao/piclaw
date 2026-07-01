@@ -22,6 +22,8 @@ interface Props {
   onSystemPromptChange?: (prompt: string | null) => void;
   onSessionStatsChange?: (stats: { tokens: { input: number; output: number; cacheRead: number; cacheWrite: number }; cost?: number } | null) => void;
   onContextUsageChange?: (usage: { percent: number | null; contextWindow: number; tokens: number | null } | null) => void;
+  navigateToEntryId?: string | null;
+  onNavigateEntryConsumed?: () => void;
 }
 
 function phaseLabel(phase: AgentPhase): string {
@@ -91,7 +93,7 @@ function Typewriter({ phrases }: { phrases: string[] }) {
   );
 }
 
-export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onContextUsageChange }: Props) {
+export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onContextUsageChange, navigateToEntryId, onNavigateEntryConsumed }: Props) {
   const isMobile = useIsMobile();
   const {
     loading, error, messages, entryIds, streamState,
@@ -101,11 +103,12 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     isAutoModelSelection,
     agentPhase,
     isNew,
+    totalMessageCount, loadingMore, hasMoreMessages,
     messagesEndRef, scrollContainerRef,
     lastUserMsgRef,
     handleSend, handleAbort, handleFork, handleNavigate, handleModelChange,
     handleCompact, handleSteer, handleFollowUp, handleAbortCompaction,
-    handleModeChange, handleThinkingLevelChange, handleAgentEventRef,
+    handleModeChange, handleThinkingLevelChange, handleLoadMore, handleAgentEventRef,
   } = useAgentSession({
     session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked,
     modelsRefreshKey, onBranchDataChange, onSystemPromptChange,
@@ -157,8 +160,100 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
 
   const { isDragOver, handleDragEnter, handleDragOver, handleDragLeave, handleDrop } = useDragDrop(onDrop);
 
+  // ── Scroll-to-top: load older messages ─────────────────────────────────
+  const loadingMoreRef = useRef(loadingMore);
+  loadingMoreRef.current = loadingMore;
+  const hasMoreMessagesRef = useRef(hasMoreMessages);
+  hasMoreMessagesRef.current = hasMoreMessages;
+
+  // Scroll-to-top detection using scroll event on the container
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      if (!loadingMoreRef.current && hasMoreMessagesRef.current && container.scrollTop <= 0) {
+        const cursor = entryIds[0];
+        if (cursor) {
+          handleLoadMore(cursor);
+        }
+      }
+    };
+
+    container.addEventListener("scroll", handleScroll, { passive: true });
+    return () => container.removeEventListener("scroll", handleScroll);
+  }, [scrollContainerRef, entryIds, handleLoadMore]);
+
   const visibleMessages = messages.filter((m) => m.role === "user" || m.role === "assistant");
   const messageRefs = useMessageRefs(visibleMessages.length);
+
+  // ── Navigate to a specific entry (from session search) ──────────
+  //
+  // Flow:
+  //   1. navigateToEntryId is set externally → effect fires.
+  //   2a. Entry already in context → scroll immediately.
+  //   2b. Entry NOT in context → call handleNavigate() which loads the
+  //       correct leaf context. On next render entryIds will contain
+  //       the target and the effect scrolls.
+  //   3. After scrolling, call onNavigateEntryConsumed() to clear.
+  //
+  const navHandledRef = useRef<string | boolean>(false);
+  useEffect(() => {
+    if (!navigateToEntryId) {
+      navHandledRef.current = false;
+      return;
+    }
+
+    // Avoid re-entering after navigation completes (true = scrolled, string = navigating to that id)
+    if (navHandledRef.current === true || navHandledRef.current === navigateToEntryId) return;
+
+    // If entry isn't in current context, navigate the tree first
+    if (!entryIds.includes(navigateToEntryId)) {
+      // Track which entry we're navigating to, so the effect won't retry
+      // the same navigation in a loop, but will allow a DIFFERENT target.
+      navHandledRef.current = navigateToEntryId;
+      handleNavigate(navigateToEntryId);
+      return;
+    }
+
+    // ── Entry is in context — find DOM element and scroll ──
+    const idx = entryIds.indexOf(navigateToEntryId);
+    if (idx === -1) return;
+
+    // Count visible messages (user + assistant) up to this index
+    let visibleCount = 0;
+    for (let i = 0; i <= idx; i++) {
+      const msg = messages[i];
+      if (msg?.role === "user" || msg?.role === "assistant") {
+        visibleCount++;
+      }
+    }
+
+    const el = messageRefs.current[visibleCount - 1];
+    if (el) {
+      requestAnimationFrame(() => {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        // Brief highlight flash
+        const origBg = el.style.background;
+        el.style.transition = "background 0.6s ease";
+        el.style.background = "rgba(37,99,235,0.07)";
+        setTimeout(() => {
+          el.style.background = origBg;
+        }, 1200);
+      });
+    }
+
+    // Mark done and tell AppShell to clear the pending entry
+    navHandledRef.current = true;
+    onNavigateEntryConsumed?.();
+  }, [
+    navigateToEntryId,
+    entryIds,
+    messages,
+    handleNavigate,
+    messageRefs,
+    onNavigateEntryConsumed,
+  ]);
 
   const isEmptyNew = isNew && messages.length === 0 && !streamState.isStreaming && !agentRunning;
 
@@ -379,6 +474,36 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
       <div className="relative flex flex-1 overflow-hidden">
         <div ref={scrollContainerRef} className="flex-1 overflow-y-auto pt-4 [scrollbar-width:none]">
           <div className="chat-msg-inner mx-auto max-w-[820px] px-4">
+
+            {/* "N older messages" banner */}
+            {(() => {
+              const olderCount = totalMessageCount - messages.length;
+              if (loadingMore) {
+                return (
+                  <div className="flex items-center justify-center py-3 text-[13px] text-text-muted">
+                    <span className="mr-2 inline-block h-3 w-3 animate-spin rounded-full border-[2px] border-text-muted border-t-transparent" />
+                    Loading older messages...
+                  </div>
+                );
+              }
+              if (olderCount > 0) {
+                return (
+                  <div className="flex items-center justify-center py-2">
+                    <button
+                      onClick={() => {
+                        const cursor = entryIds[0];
+                        if (cursor) handleLoadMore(cursor);
+                      }}
+                      className="cursor-pointer rounded-md border border-[var(--border)] bg-[var(--bg-secondary)] px-3 py-1.5 text-[12px] text-text-muted transition-colors hover:bg-[var(--hover-bg)]"
+                      style={{ fontFamily: "var(--font-mono)" }}
+                    >
+                      ↑ {olderCount} older {olderCount === 1 ? "message" : "messages"}
+                    </button>
+                  </div>
+                );
+              }
+              return null;
+            })()}
 
             {(() => {
               const toolResultsMap = new Map<string, import("@/lib/types").ToolResultMessage>();
