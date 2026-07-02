@@ -266,11 +266,13 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     if (modelList && modelList.length > 0) {
       return modelList.map((m) => ({ provider: m.provider, modelId: m.id, name: m.name })).sort(compareModelOptions);
     }
-    return Object.entries(modelNames ?? {}).map(([modelId, name]) => ({
-      provider: model?.provider ?? "unknown",
-      modelId,
-      name,
-    })).sort(compareModelOptions);
+    // modelNames keys are in "provider:modelId" format — extract both parts
+    return Object.entries(modelNames ?? {}).map(([key, name]) => {
+      const colonIdx = key.indexOf(":");
+      const provider = colonIdx >= 0 ? key.slice(0, colonIdx) : model?.provider ?? "unknown";
+      const modelId = colonIdx >= 0 ? key.slice(colonIdx + 1) : key;
+      return { provider, modelId, name };
+    }).sort(compareModelOptions);
   })();
 
   // Group options by provider, preserving insertion order
