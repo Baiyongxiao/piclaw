@@ -231,6 +231,23 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const explorerRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const uploadDoneTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // ── File search state ──
+  const [fileSearchOpen, setFileSearchOpen] = useState(false);
+  const [fileSearchQuery, setFileSearchQuery] = useState("");
+  const [fileSearchResults, setFileSearchResults] = useState<{
+    name: string;
+    fullPath: string;
+    relativePath: string;
+    isDir: boolean;
+    size: number;
+    modified: string;
+  }[]>([]);
+  const [fileSearchLoading, setFileSearchLoading] = useState(false);
+  const fileSearchInputRef = useRef<HTMLInputElement>(null);
+  const fileSearchContainerRef = useRef<HTMLDivElement>(null);
+  const fileSearchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fileSearchAbortRef = useRef<AbortController | null>(null);
+
   const loadSessions = useCallback(async (showLoading = false) => {
     try {
       if (showLoading) setLoading(true);
@@ -351,6 +368,62 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     const handler = (e: MouseEvent) => {
       if (uploadDirRef.current && !uploadDirRef.current.contains(e.target as Node)) {
         setUploadDirOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  // ── File search ──
+  const performFileSearch = useCallback(async (q: string) => {
+    const dir = selectedCwdProp ?? selectedCwd;
+    if (!dir || !q.trim()) {
+      setFileSearchResults([]);
+      return;
+    }
+
+    fileSearchAbortRef.current?.abort();
+    const controller = new AbortController();
+    fileSearchAbortRef.current = controller;
+
+    setFileSearchLoading(true);
+    try {
+      const params = new URLSearchParams({ q: q.trim(), cwd: dir });
+      const res = await fetch(`/api/files/search?${params}`, {
+        signal: controller.signal,
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json() as { results: typeof fileSearchResults };
+      setFileSearchResults(data.results);
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") return;
+      setFileSearchResults([]);
+    } finally {
+      setFileSearchLoading(false);
+    }
+  }, [selectedCwdProp, selectedCwd]);
+
+  const handleFileSearchChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setFileSearchQuery(val);
+
+    if (fileSearchDebounceRef.current) clearTimeout(fileSearchDebounceRef.current);
+
+    if (!val.trim()) {
+      setFileSearchResults([]);
+      return;
+    }
+
+    fileSearchDebounceRef.current = setTimeout(() => void performFileSearch(val), 300);
+  }, [performFileSearch]);
+
+  // Close file search on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (fileSearchContainerRef.current && !fileSearchContainerRef.current.contains(e.target as Node)) {
+        setFileSearchOpen(false);
+        setFileSearchQuery("");
+        setFileSearchResults([]);
       }
     };
     document.addEventListener("mousedown", handler);
@@ -951,6 +1024,45 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           }}
         >
           <div style={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
+            {/* ── File search toggle ── */}
+            <button
+              onClick={() => {
+                setFileSearchOpen((v) => !v);
+                if (!fileSearchOpen) {
+                  setTimeout(() => fileSearchInputRef.current?.focus(), 80);
+                } else {
+                  setFileSearchQuery("");
+                  setFileSearchResults([]);
+                }
+              }}
+              title="Search files"
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "center",
+                width: 26, height: 26, padding: 0, marginLeft: 4,
+                background: fileSearchOpen ? "rgba(37,99,235,0.10)" : "none",
+                border: "none",
+                color: fileSearchOpen ? "var(--accent)" : "var(--text-dim)",
+                cursor: "pointer",
+                borderRadius: 5,
+                flexShrink: 0,
+                transition: "color 0.15s, background 0.15s",
+              }}
+              onMouseEnter={(e) => {
+                if (fileSearchOpen) return;
+                e.currentTarget.style.color = "var(--text-muted)";
+                e.currentTarget.style.background = "var(--bg-hover)";
+              }}
+              onMouseLeave={(e) => {
+                if (fileSearchOpen) return;
+                e.currentTarget.style.color = "var(--text-dim)";
+                e.currentTarget.style.background = "none";
+              }}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" style={{ flexShrink: 0 }}>
+                <circle cx="11" cy="11" r="8" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+              </svg>
+            </button>
             <button
               onClick={() => setExplorerOpen((v) => !v)}
               style={{
@@ -1190,6 +1302,225 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               style={{ display: "none" }}
             />
           </div>
+
+          {/* ── File search input & results ── */}
+          {fileSearchOpen && (
+            <div
+              ref={fileSearchContainerRef}
+              style={{
+                position: "relative",
+                padding: "0 8px 6px",
+                borderBottom: "1px solid var(--border)",
+                flexShrink: 0,
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  height: 28,
+                  padding: "0 8px",
+                  background: "var(--bg-hover)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 6,
+                  transition: "border-color 0.15s",
+                }}
+              >
+                <svg
+                  width="10" height="10" viewBox="0 0 24 24" fill="none"
+                  stroke="var(--text-dim)" strokeWidth="2.2" strokeLinecap="round"
+                  style={{ flexShrink: 0 }}
+                >
+                  <circle cx="11" cy="11" r="8" />
+                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+                <input
+                  ref={fileSearchInputRef}
+                  type="text"
+                  value={fileSearchQuery}
+                  onChange={handleFileSearchChange}
+                  placeholder="Search files by name…"
+                  aria-label="Search workspace files"
+                  style={{
+                    flex: 1,
+                    border: "none",
+                    background: "none",
+                    outline: "none",
+                    color: "var(--text)",
+                    fontSize: 12,
+                    fontFamily: "inherit",
+                    lineHeight: 1,
+                    padding: 0,
+                    minWidth: 0,
+                  }}
+                />
+                {fileSearchLoading && (
+                  <span style={{ width: 10, height: 10, flexShrink: 0, color: "var(--text-dim)", fontSize: 10 }}>
+                    ⋯
+                  </span>
+                )}
+                {fileSearchQuery && !fileSearchLoading && (
+                  <button
+                    onClick={() => {
+                      setFileSearchQuery("");
+                      setFileSearchResults([]);
+                      fileSearchInputRef.current?.focus();
+                    }}
+                    style={{
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      width: 16, height: 16, padding: 0,
+                      background: "none", border: "none",
+                      color: "var(--text-dim)", cursor: "pointer", borderRadius: 3,
+                    }}
+                    title="Clear search"
+                  >
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+                      <line x1="18" y1="6" x2="6" y2="18" />
+                      <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+
+              {/* Results dropdown */}
+              {fileSearchQuery.trim() && fileSearchResults.length > 0 && (
+                <div
+                  style={{
+                    position: "absolute",
+                    top: "calc(100% - 4px)",
+                    left: 8,
+                    right: 8,
+                    zIndex: 150,
+                    background: "var(--bg)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 8,
+                    boxShadow: "0 6px 20px rgba(0,0,0,0.10)",
+                    overflow: "hidden",
+                    maxHeight: "min(300px, 50vh)",
+                    display: "flex",
+                    flexDirection: "column",
+                  }}
+                >
+                  <div
+                    style={{
+                      padding: "4px 10px",
+                      fontSize: 10,
+                      color: "var(--text-dim)",
+                      borderBottom: "1px solid var(--border)",
+                      flexShrink: 0,
+                    }}
+                  >
+                    {fileSearchResults.length} {fileSearchResults.length === 1 ? "file" : "files"} found
+                  </div>
+                  <div style={{ overflowY: "auto", flex: 1 }}>
+                    {fileSearchResults.map((r) => (
+                      <button
+                        key={r.fullPath}
+                        onClick={() => {
+                          setFileSearchOpen(false);
+                          setFileSearchQuery("");
+                          setFileSearchResults([]);
+                          if (!r.isDir && onOpenFile) {
+                            onOpenFile(r.fullPath, r.name);
+                          }
+                        }}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                          width: "100%",
+                          padding: "6px 10px",
+                          background: "transparent",
+                          border: "none",
+                          borderBottom: "1px solid var(--border)",
+                          cursor: "pointer",
+                          textAlign: "left",
+                          transition: "background 0.08s",
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                      >
+                        <span style={{ flexShrink: 0, display: "flex", alignItems: "center", color: "var(--text-dim)" }}>
+                          {r.isDir ? (
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                            </svg>
+                          ) : (
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                              <polyline points="14 2 14 8 20 8" />
+                            </svg>
+                          )}
+                        </span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div
+                            style={{
+                              fontSize: 11,
+                              color: "var(--text)",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                              fontWeight: 500,
+                            }}
+                          >
+                            {r.name}
+                          </div>
+                          <div
+                            style={{
+                              fontSize: 10,
+                              color: "var(--text-dim)",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                            title={r.relativePath}
+                          >
+                            {r.relativePath}
+                          </div>
+                        </div>
+                        {!r.isDir && (
+                          <span style={{ fontSize: 10, color: "var(--text-dim)", flexShrink: 0 }}>
+                            {r.size > 1024 * 1024
+                              ? (r.size / 1024 / 1024).toFixed(1) + " MB"
+                              : r.size > 1024
+                                ? (r.size / 1024).toFixed(0) + " KB"
+                                : r.size + " B"}
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                  <div
+                    style={{
+                      padding: "3px 10px",
+                      fontSize: 9,
+                      color: "var(--text-dim)",
+                      borderTop: "1px solid var(--border)",
+                      flexShrink: 0,
+                      fontStyle: "italic",
+                    }}
+                  >
+                    Click a file to open it · Directories shown for orientation
+                  </div>
+                </div>
+              )}
+
+              {fileSearchQuery.trim() && !fileSearchLoading && fileSearchResults.length === 0 && (
+                <div
+                  style={{
+                    padding: "8px 10px",
+                    fontSize: 11,
+                    color: "var(--text-dim)",
+                    textAlign: "center",
+                  }}
+                >
+                  No files matching &quot;{fileSearchQuery}&quot;
+                </div>
+              )}
+            </div>
+          )}
+
           {explorerOpen && (
             <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden" }}>
               <FileExplorer

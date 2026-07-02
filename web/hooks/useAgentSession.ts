@@ -353,9 +353,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
             if (d?.state?.isStreaming) {
               connectEvents(sid);
             } else {
-              // Agent stopped while disconnected — clean up client state
+              // Agent stopped while disconnected — clean up client state.
+              // Must reset streamState too, otherwise the stale streamingMessage
+              // keeps rendering at the bottom and duplicates the finalized message
+              // now present in `messages` (loaded below).
               setAgentRunning(false);
               setAgentPhase(null);
+              dispatch({ type: "end" });
               loadSession(sid);
             }
           } catch {
@@ -920,9 +924,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           })
           .then((d) => {
             if (!d?.state?.isStreaming && agentRunningRef.current) {
-              // Agent stopped but we missed the agent_end event — clean up
+              // Agent stopped but we missed the agent_end event — clean up.
+              // Reset streamState so the stale streamingMessage doesn't keep
+              // rendering and duplicate the finalized message in `messages`.
               setAgentRunning(false);
               setAgentPhase(null);
+              dispatch({ type: "end" });
               loadSessionFull(sid);
             }
           })
