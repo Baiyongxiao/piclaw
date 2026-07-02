@@ -30,6 +30,35 @@ export class SqliteStore implements SessionStore {
 	private db: BetterSqlite3Database;
 	private dbPath: string;
 
+	/**
+	 * Shared default store singleton.
+	 * All SessionManager operations within the same process share a single
+	 * database connection, eliminating cross-connection WAL visibility issues
+	 * that could cause intermittent failures when switching sessions.
+	 */
+	private static defaultStore: SqliteStore | null = null;
+
+	/**
+	 * Get or create the shared default store instance.
+	 * Uses the default agent sessions database path.
+	 */
+	static getDefault(): SqliteStore {
+		if (!SqliteStore.defaultStore) {
+			SqliteStore.defaultStore = new SqliteStore();
+		}
+		return SqliteStore.defaultStore;
+	}
+
+	/**
+	 * Reset the shared default store (for testing only).
+	 */
+	static resetDefaultForTesting(): void {
+		if (SqliteStore.defaultStore) {
+			SqliteStore.defaultStore.close();
+			SqliteStore.defaultStore = null;
+		}
+	}
+
 	constructor(dbPath?: string) {
 		this.dbPath = dbPath ?? join(getDefaultAgentDir(), "sessions.db");
 		const dir = dirname(this.dbPath);

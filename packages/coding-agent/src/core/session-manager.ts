@@ -425,23 +425,23 @@ export function buildSessionContext(
  * Delegates to the default SqliteStore.
  */
 export function getDefaultSessionDir(cwd: string, agentDir: string = getDefaultAgentDir()): string {
-	return new SqliteStore().getDefaultSessionDir(cwd, agentDir);
+	return SqliteStore.getDefault().getDefaultSessionDir(cwd, agentDir);
 }
 
 /**
  * Exported for testing — load entries from a session.
- * Uses the default SqliteStore.
+ * Uses the shared default SqliteStore.
  */
 export function loadEntriesFromFile(filePath: string): FileEntry[] {
-	return new SqliteStore().loadEntries(filePath);
+	return SqliteStore.getDefault().loadEntries(filePath);
 }
 
 /**
  * Exported for testing — find most recent session.
- * Uses the default SqliteStore.
+ * Uses the shared default SqliteStore.
  */
 export function findMostRecentSession(sessionDir: string, cwd?: string): string | null {
-	return new SqliteStore().findMostRecent(sessionDir, cwd);
+	return SqliteStore.getDefault().findMostRecent(sessionDir, cwd);
 }
 
 /** Progress callback for session listing. */
@@ -1099,7 +1099,7 @@ export class SessionManager {
 	 * @param sessionDir Optional session directory. If omitted, uses default (~/.pi/agent/sessions/<encoded-cwd>/).
 	 */
 	static create(cwd: string, sessionDir?: string, options?: NewSessionOptions): SessionManager {
-		const store = new SqliteStore();
+		const store = SqliteStore.getDefault();
 		const dir = sessionDir ? normalizePath(sessionDir) : store.getDefaultSessionDir(cwd);
 		return new SessionManager(store, cwd, dir, undefined, true, options);
 	}
@@ -1111,7 +1111,7 @@ export class SessionManager {
 	 * @param cwdOverride Optional cwd override instead of the session header cwd.
 	 */
 	static open(path: string, sessionDir?: string, cwdOverride?: string): SessionManager {
-		const store = new SqliteStore();
+		const store = SqliteStore.getDefault();
 		const entries = store.loadEntries(path);
 		const header = entries.find((e) => e.type === "session") as SessionHeader | undefined;
 		const cwd = cwdOverride ?? header?.cwd ?? process.cwd();
@@ -1125,7 +1125,7 @@ export class SessionManager {
 	 * @param sessionDir Optional session directory.
 	 */
 	static continueRecent(cwd: string, sessionDir?: string): SessionManager {
-		const store = new SqliteStore();
+		const store = SqliteStore.getDefault();
 		const dir = sessionDir ? normalizePath(sessionDir) : store.getDefaultSessionDir(cwd);
 		const mostRecent = store.findMostRecent(dir, cwd);
 		if (mostRecent) {
@@ -1136,7 +1136,7 @@ export class SessionManager {
 
 	/** Create an in-memory session (no file persistence) */
 	static inMemory(cwd: string = process.cwd(), options?: NewSessionOptions): SessionManager {
-		const store = new SqliteStore();
+		const store = SqliteStore.getDefault();
 		return new SessionManager(store, cwd, "", undefined, false, options);
 	}
 
@@ -1162,7 +1162,7 @@ export class SessionManager {
 		sessionDir?: string,
 		options?: NewSessionOptions,
 	): SessionManager {
-		const store = new SqliteStore();
+		const store = SqliteStore.getDefault();
 		const resolvedTargetCwd = resolvePath(targetCwd);
 		const sourceEntries = store.loadEntries(sourcePath);
 		if (sourceEntries.length === 0) {
@@ -1214,7 +1214,7 @@ export class SessionManager {
 	 * @param onProgress Optional callback for progress updates (loaded, total)
 	 */
 	static async list(cwd: string, sessionDir?: string, onProgress?: SessionListProgress): Promise<SessionInfo[]> {
-		const store = new SqliteStore();
+		const store = SqliteStore.getDefault();
 		const dir = sessionDir ? normalizePath(sessionDir) : store.getDefaultSessionDir(cwd);
 		const resolvedCwd = resolvePath(cwd);
 		const sessions = (await store.listSessions(dir, onProgress)).filter(
@@ -1234,7 +1234,7 @@ export class SessionManager {
 		sessionDirOrOnProgress?: string | SessionListProgress,
 		onProgress?: SessionListProgress,
 	): Promise<SessionInfo[]> {
-		const store = new SqliteStore();
+		const store = SqliteStore.getDefault();
 		return store.listAllSessions(
 			typeof sessionDirOrOnProgress === "string" ? sessionDirOrOnProgress : undefined,
 			typeof sessionDirOrOnProgress === "function" ? sessionDirOrOnProgress : onProgress,

@@ -373,7 +373,21 @@ export function getPackageDir(): string {
 
 	if (isBunBinary) {
 		// Bun binary: process.execPath points to the compiled executable
-		return dirname(process.execPath);
+		const exeDir = dirname(process.execPath);
+		// If package.json exists alongside the executable, return that directory directly
+		if (existsSync(join(exeDir, "package.json"))) {
+			return exeDir;
+		}
+		// Otherwise walk up to find package.json (e.g., when the binary is installed
+		// to a global bin directory without accompanying asset files)
+		let dir = exeDir;
+		while (dir !== dirname(dir)) {
+			if (existsSync(join(dir, "package.json"))) {
+				return dir;
+			}
+			dir = dirname(dir);
+		}
+		return exeDir;
 	}
 	// Node.js: walk up from __dirname until we find package.json
 	let dir = __dirname;
