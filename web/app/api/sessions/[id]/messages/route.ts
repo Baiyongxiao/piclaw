@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { SessionManager } from "@piclaw/coding-agent";
-import { resolveSessionPath, buildSessionContext } from "@/lib/session-reader";
+import { SessionManager, SqliteStore } from "@piclaw/coding-agent";
+import { buildSessionContext } from "@/lib/session-reader";
 import { MESSAGE_PAGE_SIZE } from "@/lib/constants";
 
 const MAX_PAGE_SIZE = 100;
@@ -55,12 +55,11 @@ export async function GET(
   const limit = parseLimitParam(limitStr, MESSAGE_PAGE_SIZE, MAX_PAGE_SIZE);
 
   try {
-    const filePath = await resolveSessionPath(id);
-    if (!filePath) {
+    const store = new SqliteStore();
+    if (!store.readHeader(id)) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
-
-    const sm = SessionManager.open(filePath);
+    const sm = SessionManager.open(id);
     const entries = sm.getEntries() as never;
     const leafId = sm.getLeafId();
     const context = buildSessionContext(entries, leafId);

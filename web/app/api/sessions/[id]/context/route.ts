@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { SessionManager } from "@piclaw/coding-agent";
-import { resolveSessionPath, buildSessionContext } from "@/lib/session-reader";
+import { SessionManager, SqliteStore } from "@piclaw/coding-agent";
+import { buildSessionContext } from "@/lib/session-reader";
 import { MESSAGE_PAGE_SIZE } from "@/lib/constants";
 
 function sliceContextMessages(
@@ -34,12 +34,11 @@ export async function GET(
   const leafId = url.searchParams.get("leafId") ?? undefined;
 
   try {
-    const filePath = await resolveSessionPath(id);
-    if (!filePath) {
+    const store = new SqliteStore();
+    if (!store.readHeader(id)) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
-
-    const sm = SessionManager.open(filePath);
+    const sm = SessionManager.open(id);
     const context = buildSessionContext(sm.getEntries() as never, leafId);
 
     const paginated = sliceContextMessages(context.messages, context.entryIds, MESSAGE_PAGE_SIZE);

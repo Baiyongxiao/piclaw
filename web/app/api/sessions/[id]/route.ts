@@ -1,10 +1,6 @@
 import { NextResponse } from "next/server";
-import { readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "fs";
-import { join } from "path";
-import { SessionManager } from "@piclaw/coding-agent";
+import { SessionManager, SqliteStore } from "@piclaw/coding-agent";
 import {
-  resolveSessionPath,
-  invalidateSessionPathCache,
   buildSessionContext,
   listAllSessions,
 } from "@/lib/session-reader";
@@ -143,24 +139,26 @@ export async function GET(
 ) {
   const { id } = await params;
   try {
-    const filePath = await resolveSessionPath(id);
-    if (!filePath) {
+    const store = new SqliteStore();
+    const header = store.readHeader(id);
+    if (!header) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
 
-    const sm = SessionManager.open(filePath);
+    const sm = SessionManager.open(id);
     const entries = sm.getEntries() as never;
     const leafId = sm.getLeafId();
     const tree = projectTreeForResponse(sm.getTree());
     const context = buildSessionContext(entries, leafId);
 
-    const header = sm.getHeader();
-    let modified = header?.timestamp ?? new Date().toISOString();
-    try { modified = statSync(filePath).mtime.toISOString(); } catch { /* use header timestamp */ }
+    // Query modified_at from the database (header.timestamp is created_at)
+    const db = store.getDatabase();
+    const row = db.prepare("SELECT modified_at FROM sessions WHERE id = ?").get(id) as { modified_at: string } | undefined;
+    const modified = row?.modified_at ?? header.timestamp ?? new Date().toISOString();
     const allSessions = await listAllSessions();
     const parentSessionId = allSessions.find((s) => s.id === id)?.parentSessionId;
     const info = header ? {
-      path: filePath,
+      path: id,
       id: header.id,
       cwd: header.cwd ?? "",
       name: sm.getSessionName(),
@@ -202,7 +200,7 @@ export async function GET(
 
     return NextResponse.json({
       sessionId: id,
-      filePath,
+      filePath: id,
       info,
       leafId,
       tree,
@@ -231,11 +229,10 @@ export async function PATCH(
     if (typeof name !== "string") {
       return NextResponse.json({ error: "name is required" }, { status: 400 });
     }
-    const filePath = await resolveSessionPath(id);
-    if (!filePath) {
+    const sm = SessionManager.open(id);
+    if (!sm.getHeader()) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
-    const sm = SessionManager.open(filePath);
     sm.appendSessionInfo(name.trim());
     return NextResponse.json({ ok: true });
   } catch (error) {
@@ -250,43 +247,26 @@ export async function DELETE(
 ) {
   const { id } = await params;
   try {
-    const filePath = await resolveSessionPath(id);
-    if (!filePath) {
+    const store = new SqliteStore();
+    const header = store.readHeader(id);
+    if (!header) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
 
-    // Read header before deleting to get parentSession path
-    const firstLine = readFileSync(filePath, "utf8").split("\n")[0];
-    let parentSessionPath: string | undefined;
-    try {
-      const header = JSON.parse(firstLine) as { type?: string; parentSession?: string };
-      if (header.type === "session") parentSessionPath = header.parentSession;
-    } catch { /* ignore */ }
-
-    // Re-attach all direct children to this session's parent (cascade re-parent)
-    // Scan sibling files in the same directory
-    const dir = filePath.replace(/\\/g, "/").split("/").slice(0, -1).join("/");
-    try {
-      const files = readdirSync(dir).filter((f) => f.endsWith(".jsonl") && join(dir, f) !== filePath);
-      for (const file of files) {
-        const childPath = join(dir, file);
-        try {
-          const content = readFileSync(childPath, "utf8");
-          const lines = content.split("\n");
-          const header = JSON.parse(lines[0]) as { type?: string; parentSession?: string };
-          if (header.type === "session" && header.parentSession === filePath) {
-            // Rewrite header with new parentSession
-            header.parentSession = parentSessionPath;
-            lines[0] = JSON.stringify(header);
-            writeFileSync(childPath, lines.join("\n"));
-          }
-        } catch { /* skip malformed */ }
-      }
-    } catch { /* skip if dir unreadable */ }
-
+    // Kill running agent if any
     getRpcSession(id)?.destroy();
-    unlinkSync(filePath);
-    invalidateSessionPathCache(id);
+
+    // Re-parent children + delete session atomically
+    const db = store.getDatabase();
+    const tx = db.transaction(() => {
+      db.prepare("UPDATE sessions SET parent_session = ? WHERE parent_session = ?").run(
+        header.parentSession ?? null,
+        id,
+      );
+      store.deleteSessionFile(id);
+    });
+    tx();
+
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });

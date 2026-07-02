@@ -12,19 +12,12 @@ export function stripSkillBlocks(text: string): string {
   return text.replace(SKILL_BLOCK_RE, "").trimStart();
 }
 
-export function getSessionsDir(): string {
-  return `${getAgentDir()}/sessions`;
-}
-
 export async function listAllSessions(): Promise<SessionInfo[]> {
   const piSessions: PiSessionInfo[] = await SessionManager.listAll();
   const pathToId = new Map<string, string>();
   for (const s of piSessions) pathToId.set(s.path, s.id);
 
-  const cache = getPathCache();
   return piSessions.map((s) => {
-    // Populate path cache so resolveSessionPath works without a full scan
-    cache.set(s.id, s.path);
     return {
       path: s.path,
       id: s.id,
@@ -37,41 +30,6 @@ export async function listAllSessions(): Promise<SessionInfo[]> {
       parentSessionId: s.parentSessionPath ? pathToId.get(s.parentSessionPath) : undefined,
     };
   });
-}
-
-// ============================================================================
-// Session path cache: sessionId → absolute file path
-// Stored in globalThis for hot-reload safety
-// ============================================================================
-declare global {
-  var __piSessionPathCache: Map<string, string> | undefined;
-}
-
-function getPathCache(): Map<string, string> {
-  if (!globalThis.__piSessionPathCache) globalThis.__piSessionPathCache = new Map();
-  return globalThis.__piSessionPathCache;
-}
-
-export async function resolveSessionPath(sessionId: string): Promise<string | null> {
-  const cached = getPathCache().get(sessionId);
-  if (cached) return cached;
-
-  // Cache miss: scan all sessions to populate cache, then retry
-  await listAllSessions();
-  return getPathCache().get(sessionId) ?? null;
-}
-
-export function cacheSessionPath(sessionId: string, filePath: string): void {
-  getPathCache().set(sessionId, filePath);
-}
-
-export function invalidateSessionPathCache(sessionId: string): void {
-  getPathCache().delete(sessionId);
-}
-
-export function getSessionEntries(filePath: string): SessionEntry[] {
-  const entries = SessionManager.open(filePath).getEntries();
-  return entries as unknown as SessionEntry[];
 }
 
 export function buildTree(entries: SessionEntry[]): SessionTreeNode[] {
@@ -189,11 +147,5 @@ export function buildSessionContext(entries: SessionEntry[], leafId?: string | n
     model: piCtx.model,
   };
 }
-
-export function getLeafId(entries: SessionEntry[]): string | null {
-  if (entries.length === 0) return null;
-  return entries[entries.length - 1].id;
-}
-
 
 

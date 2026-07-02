@@ -3,7 +3,6 @@ import {
   SessionManager,
   createBashToolDefinition,
 } from "@piclaw/coding-agent";
-import { cacheSessionPath } from "./session-reader";
 import { isSafeCommand } from "./plan-bash-guard";
 import { PLAN_PROMPT_SUFFIX, PLAN_MODE_MARKER } from "./mode-prompts";
 import type { AgentSessionLike, ModelLike } from "./pi-types";
@@ -273,7 +272,6 @@ export class AgentSessionWrapper {
         }
 
         const newSessionId = SessionManager.open(newSessionFile, sessionDir).getSessionId();
-        cacheSessionPath(newSessionId, newSessionFile);
         this.destroy();
         return { cancelled: false, newSessionId };
       }
@@ -469,8 +467,6 @@ export async function startRpcSession(
     wrapper.start();
 
     const realSessionId = inner.sessionId as string;
-    const realSessionFile = inner.sessionFile as string | undefined;
-    if (realSessionFile) cacheSessionPath(realSessionId, realSessionFile);
 
     wrapper.onDestroy(() => registry.delete(realSessionId));
     registry.set(realSessionId, wrapper);

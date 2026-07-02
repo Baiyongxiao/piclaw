@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { resolveSessionPath } from "@/lib/session-reader";
 import { startRpcSession, getRpcSession } from "@/lib/rpc-manager";
 import { SessionManager } from "@piclaw/coding-agent";
 
@@ -20,14 +19,14 @@ export async function POST(
       return NextResponse.json({ success: true, data: result });
     }
 
-    const filePath = await resolveSessionPath(id);
-    if (!filePath) {
+    const sm = SessionManager.open(id);
+    const header = sm.getHeader();
+    if (!header) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
+    const cwd = header.cwd ?? process.cwd();
 
-    const cwd = SessionManager.open(filePath).getHeader()?.cwd ?? process.cwd();
-
-    const { session } = await startRpcSession(id, filePath, cwd);
+    const { session } = await startRpcSession(id, id, cwd);
     const result = await session.send(body);
 
     return NextResponse.json({ success: true, data: result });
