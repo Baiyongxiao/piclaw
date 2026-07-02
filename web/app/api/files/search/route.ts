@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
-import { getAllowedRoots, isPathAllowed, IGNORED_NAMES, IGNORED_SUFFIXES } from "@/lib/file-access";
+import { getAllowedRoots, isPathAllowed, IGNORED_NAMES, IGNORED_SUFFIXES, normalizeCwd } from "@/lib/file-access";
 
 export interface FileSearchResult {
   name: string;
@@ -75,43 +75,60 @@ function collectMatches(
 }
 
 export async function GET(req: Request) {
-  const url = new URL(req.url);
-  const q = url.searchParams.get("q")?.trim();
-  const cwd = url.searchParams.get("cwd")?.trim();
-
-  if (!q || !cwd) {
-    return NextResponse.json<FileSearchResponse>({ results: [] });
-  }
-
-  // Security: verify the cwd is within allowed roots
-  const allowedRoots = await getAllowedRoots();
-  if (!isPathAllowed(cwd, allowedRoots)) {
-    return NextResponse.json({ error: "Access denied" }, { status: 403 });
-  }
-
-  // Validate cwd exists and is a directory
   try {
-    if (!fs.statSync(cwd).isDirectory()) {
-      return NextResponse.json({ error: "Not a directory" }, { status: 400 });
+    const url = new URL(req.url);
+    const q = url.searchParams.get("q")?.trim();
+    const rawCwd = url.searchParams.get("cwd")?.trim();
+
+    if (!q || !rawCwd) {
+      return NextResponse.json<FileSearchResponse>({ results: [] });
     }
-  } catch {
-    return NextResponse.json({ error: "Directory not found" }, { status: 404 });
+
+    // Normalize cwd (resolve ~, ~/, relative paths)
+    const cwd = normalizeCwd(rawCwd);
+
+    // Security: resolve symlinks before verifying path
+    let realCwd: string;
+    try {
+      realCwd = fs.realpathSync(cwd);
+    } catch {
+      return NextResponse.json({ error: "Invalid path" }, { status: 400 });
+    }
+
+    const allowedRoots = await getAllowedRoots();
+    if (!isPathAllowed(realCwd, allowedRoots)) {
+      return NextResponse.json({ error: "Access denied" }, { status: 403 });
+    }
+
+    // Validate cwd exists and is a directory
+    try {
+      if (!fs.statSync(realCwd).isDirectory()) {
+        return NextResponse.json({ error: "Not a directory" }, { status: 400 });
+      }
+    } catch {
+      return NextResponse.json({ error: "Directory not found" }, { status: 404 });
+    }
+
+    // Guard against NaN/negative limit values
+    const limitParam = parseInt(url.searchParams.get("limit") ?? "30", 10);
+    const maxResults = Math.min(
+      Number.isFinite(limitParam) && limitParam > 0 ? limitParam : 30,
+      100,
+    );
+    const maxDepth = 8;
+
+    const results: FileSearchResult[] = [];
+    collectMatches(realCwd, q, realCwd, results, 0, maxResults, maxDepth);
+
+    // Sort: directories first, then by relative path alphabetically
+    results.sort((a, b) => {
+      if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+      return a.relativePath.localeCompare(b.relativePath);
+    });
+
+    return NextResponse.json<FileSearchResponse>({ results });
+  } catch (error) {
+    console.error("File search failed:", error);
+    return NextResponse.json({ error: "Internal error" }, { status: 500 });
   }
-
-  const maxResults = Math.min(
-    parseInt(url.searchParams.get("limit") ?? "30", 10),
-    100,
-  );
-  const maxDepth = 8;
-
-  const results: FileSearchResult[] = [];
-  collectMatches(cwd, q, cwd, results, 0, maxResults, maxDepth);
-
-  // Sort: directories first, then by relative path alphabetically
-  results.sort((a, b) => {
-    if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
-    return a.relativePath.localeCompare(b.relativePath);
-  });
-
-  return NextResponse.json<FileSearchResponse>({ results });
 }

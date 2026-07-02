@@ -243,10 +243,19 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     modified: string;
   }[]>([]);
   const [fileSearchLoading, setFileSearchLoading] = useState(false);
+  const [searchPopupPos, setSearchPopupPos] = useState<{ top: number; left: number; width: number } | null>(null);
   const fileSearchInputRef = useRef<HTMLInputElement>(null);
   const fileSearchContainerRef = useRef<HTMLDivElement>(null);
   const fileSearchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fileSearchAbortRef = useRef<AbortController | null>(null);
+
+  // Clean up file search debounce & abort on unmount
+  useEffect(() => {
+    return () => {
+      if (fileSearchDebounceRef.current) clearTimeout(fileSearchDebounceRef.current);
+      fileSearchAbortRef.current?.abort();
+    };
+  }, []);
 
   const loadSessions = useCallback(async (showLoading = false) => {
     try {
@@ -397,6 +406,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       setFileSearchResults(data.results);
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") return;
+      console.error("File search failed:", err);
       setFileSearchResults([]);
     } finally {
       setFileSearchLoading(false);
@@ -417,6 +427,18 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     fileSearchDebounceRef.current = setTimeout(() => void performFileSearch(val), 300);
   }, [performFileSearch]);
 
+  // Calculate dropdown position when results come in
+  useEffect(() => {
+    if (fileSearchOpen && fileSearchResults.length > 0 && fileSearchContainerRef.current) {
+      const rect = fileSearchContainerRef.current.getBoundingClientRect();
+      setSearchPopupPos({
+        top: rect.bottom + 4,
+        left: rect.left + 8,
+        width: rect.width - 16,
+      });
+    }
+  }, [fileSearchOpen, fileSearchResults]);
+
   // Close file search on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -424,6 +446,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         setFileSearchOpen(false);
         setFileSearchQuery("");
         setFileSearchResults([]);
+        setSearchPopupPos(null);
       }
     };
     document.addEventListener("mousedown", handler);
@@ -1024,45 +1047,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           }}
         >
           <div style={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
-            {/* ── File search toggle ── */}
-            <button
-              onClick={() => {
-                setFileSearchOpen((v) => !v);
-                if (!fileSearchOpen) {
-                  setTimeout(() => fileSearchInputRef.current?.focus(), 80);
-                } else {
-                  setFileSearchQuery("");
-                  setFileSearchResults([]);
-                }
-              }}
-              title="Search files"
-              style={{
-                display: "flex", alignItems: "center", justifyContent: "center",
-                width: 26, height: 26, padding: 0, marginLeft: 4,
-                background: fileSearchOpen ? "rgba(37,99,235,0.10)" : "none",
-                border: "none",
-                color: fileSearchOpen ? "var(--accent)" : "var(--text-dim)",
-                cursor: "pointer",
-                borderRadius: 5,
-                flexShrink: 0,
-                transition: "color 0.15s, background 0.15s",
-              }}
-              onMouseEnter={(e) => {
-                if (fileSearchOpen) return;
-                e.currentTarget.style.color = "var(--text-muted)";
-                e.currentTarget.style.background = "var(--bg-hover)";
-              }}
-              onMouseLeave={(e) => {
-                if (fileSearchOpen) return;
-                e.currentTarget.style.color = "var(--text-dim)";
-                e.currentTarget.style.background = "none";
-              }}
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" style={{ flexShrink: 0 }}>
-                <circle cx="11" cy="11" r="8" />
-                <line x1="21" y1="21" x2="16.65" y2="16.65" />
-              </svg>
-            </button>
             <button
               onClick={() => setExplorerOpen((v) => !v)}
               style={{
@@ -1090,6 +1074,46 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 <polyline points="3 2 7 5 3 8" />
               </svg>
               Explorer
+            </button>
+            {/* ── File search toggle ── */}
+            <button
+              onClick={() => {
+                setFileSearchOpen((v) => !v);
+                if (!fileSearchOpen) {
+                  setTimeout(() => fileSearchInputRef.current?.focus(), 80);
+                } else {
+                  setFileSearchQuery("");
+                  setFileSearchResults([]);
+                  setSearchPopupPos(null);
+                }
+              }}
+              title="Search files"
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "center",
+                width: 26, height: 26, padding: 0,
+                background: fileSearchOpen ? "rgba(37,99,235,0.10)" : "none",
+                border: "none",
+                color: fileSearchOpen ? "var(--accent)" : "var(--text-dim)",
+                cursor: "pointer",
+                borderRadius: 5,
+                flexShrink: 0,
+                transition: "color 0.15s, background 0.15s",
+              }}
+              onMouseEnter={(e) => {
+                if (fileSearchOpen) return;
+                e.currentTarget.style.color = "var(--text-muted)";
+                e.currentTarget.style.background = "var(--bg-hover)";
+              }}
+              onMouseLeave={(e) => {
+                if (fileSearchOpen) return;
+                e.currentTarget.style.color = "var(--text-dim)";
+                e.currentTarget.style.background = "none";
+              }}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" style={{ flexShrink: 0 }}>
+                <circle cx="11" cy="11" r="8" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+              </svg>
             </button>
             <button
               onClick={() => {
@@ -1383,19 +1407,19 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 )}
               </div>
 
-              {/* Results dropdown */}
-              {fileSearchQuery.trim() && fileSearchResults.length > 0 && (
+              {/* Results dropdown — use fixed positioning to avoid overflow:hidden clipping */}
+              {fileSearchQuery.trim() && fileSearchResults.length > 0 && searchPopupPos && (
                 <div
                   style={{
-                    position: "absolute",
-                    top: "calc(100% - 4px)",
-                    left: 8,
-                    right: 8,
-                    zIndex: 150,
+                    position: "fixed",
+                    top: searchPopupPos.top,
+                    left: searchPopupPos.left,
+                    width: searchPopupPos.width,
+                    zIndex: 9999,
                     background: "var(--bg)",
                     border: "1px solid var(--border)",
                     borderRadius: 8,
-                    boxShadow: "0 6px 20px rgba(0,0,0,0.10)",
+                    boxShadow: "0 6px 20px rgba(0,0,0,0.15)",
                     overflow: "hidden",
                     maxHeight: "min(300px, 50vh)",
                     display: "flex",
@@ -1421,6 +1445,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                           setFileSearchOpen(false);
                           setFileSearchQuery("");
                           setFileSearchResults([]);
+                          setSearchPopupPos(null);
                           if (!r.isDir && onOpenFile) {
                             onOpenFile(r.fullPath, r.name);
                           }
