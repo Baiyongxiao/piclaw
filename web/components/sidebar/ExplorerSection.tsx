@@ -275,6 +275,7 @@ export function ExplorerSection({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadDirRef = useRef<HTMLDivElement>(null);
   const uploadDoneTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingUploadDirRef = useRef<string>("");
 
   useEffect(() => {
     return () => {
@@ -326,7 +327,9 @@ export function ExplorerSection({
 
       setUploading(true);
       try {
-        const targetDir = uploadDir ? cwd + "/" + uploadDir : cwd;
+        // Read the target subdir from ref to avoid stale closure issues
+        const targetSubdir = pendingUploadDirRef.current;
+        const targetDir = targetSubdir ? cwd + "/" + targetSubdir : cwd;
         const formData = new FormData();
         for (let i = 0; i < files.length; i++) {
           formData.append("files", files[i]);
@@ -353,7 +356,7 @@ export function ExplorerSection({
         if (fileInputRef.current) fileInputRef.current.value = "";
       }
     },
-    [cwd, uploadDir],
+    [cwd],
   );
 
   const handleUploadToggle = useCallback(
@@ -651,6 +654,7 @@ export function ExplorerSection({
           <div style={{ padding: "4px 6px", flexShrink: 0 }}>
             <button
               onClick={() => {
+                pendingUploadDirRef.current = browsingPath;
                 setUploadDir(browsingPath);
                 setUploadDirOpen(false);
                 setUploadPopupPos(null);
@@ -707,16 +711,26 @@ export function ExplorerSection({
             )}
           </div>
 
-          {/* Hidden file input */}
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            onChange={(e) => { void handleUpload(e.target.files); }}
-            style={{ display: "none" }}
-          />
         </div>
       )}
+
+      {/* Hidden file input — always mounted so .click() + onChange work reliably */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        onChange={(e) => { void handleUpload(e.target.files); }}
+        tabIndex={-1}
+        style={{
+          position: "absolute",
+          width: 0.1,
+          height: 0.1,
+          opacity: 0,
+          overflow: "hidden",
+          pointerEvents: "none",
+          zIndex: -1,
+        }}
+      />
     </>
   );
 }

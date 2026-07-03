@@ -1,7 +1,7 @@
 import type { SessionInfo } from "./types";
 
-/** Return the N most recently active cwds across all sessions */
-export function getRecentCwds(sessions: SessionInfo[], limit = 5): string[] {
+/** Return all recently active cwds across all sessions, sorted by most recent first */
+export function getRecentCwds(sessions: SessionInfo[]): string[] {
   const latestByCwd = new Map<string, string>();
   for (const s of sessions) {
     if (!s.cwd) continue;
@@ -12,6 +12,5 @@ export function getRecentCwds(sessions: SessionInfo[], limit = 5): string[] {
   }
   return [...latestByCwd.entries()]
     .sort((a, b) => new Date(b[1]).getTime() - new Date(a[1]).getTime())
-    .slice(0, limit)
     .map(([cwd]) => cwd);
 }

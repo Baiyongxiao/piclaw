@@ -273,7 +273,8 @@ export function WorkspacePicker({
               border: "1px solid var(--border)",
               borderRadius: 8,
               boxShadow: "0 6px 20px rgba(0,0,0,0.10)",
-              overflow: "hidden",
+              overflowY: "auto",
+              maxHeight: 240,
             }}
           >
             {/* Recent cwds */}
