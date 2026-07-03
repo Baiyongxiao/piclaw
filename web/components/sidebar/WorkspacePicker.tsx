@@ -27,6 +27,8 @@ interface Props {
   allSessions: SessionInfo[];
   /** Whether sessions are still loading */
   sessionsLoading: boolean;
+  /** Called after a cwd and its sessions have been deleted */
+  onDeleteCwd?: (deletedCwd: string) => void;
 }
 
 /* ── Component ──────────────────────────────────────────────────── */
@@ -36,6 +38,7 @@ export function WorkspacePicker({
   onCwdChange,
   allSessions,
   sessionsLoading,
+  onDeleteCwd,
 }: Props) {
   const [homeDir, setHomeDir] = useState("");
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -45,6 +48,8 @@ export function WorkspacePicker({
   const [customPathValidating, setCustomPathValidating] = useState(false);
   const [customPathMissingCwd, setCustomPathMissingCwd] = useState<string | null>(null);
   const [customPathCreating, setCustomPathCreating] = useState(false);
+  const [hoveredCwd, setHoveredCwd] = useState<string | null>(null);
+  const [deletingCwd, setDeletingCwd] = useState<string | null>(null);
   const customPathInputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -164,6 +169,46 @@ export function WorkspacePicker({
     }
   }, [onCwdChange]);
 
+  const handleDeleteCwd = useCallback(
+    async (targetCwd: string) => {
+      if (deletingCwd) return;
+      const confirmed = window.confirm(
+        `删除工作区“${targetCwd}”及其所有会话？此操作不可撤销。`,
+      );
+      if (!confirmed) return;
+
+      setDeletingCwd(targetCwd);
+      try {
+        const res = await fetch("/api/cwd/delete-sessions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ cwd: targetCwd }),
+        });
+        const data = (await res.json()) as {
+          ok?: boolean;
+          error?: string;
+        };
+        if (!res.ok || !data.ok) {
+          console.error("Failed to delete sessions:", data.error ?? res.status);
+          alert(`删除失败：${data.error ?? `请求错误 (${res.status})`}`);
+          return;
+        }
+        // If the currently selected cwd was deleted, clear selection
+        if (cwd === targetCwd) {
+          onCwdChange(null);
+        }
+        onDeleteCwd?.(targetCwd);
+      } catch (e) {
+        console.error("Failed to delete sessions:", e);
+        alert("删除失败，请检查网络连接后重试。");
+      } finally {
+        setDeletingCwd(null);
+        setHoveredCwd(null);
+      }
+    },
+    [deletingCwd, cwd, onCwdChange, onDeleteCwd],
+  );
+
   const recentCwds = getRecentCwds(allSessions);
 
   return (
@@ -233,63 +278,144 @@ export function WorkspacePicker({
           >
             {/* Recent cwds */}
             {recentCwds.map((rcwd) => (
-              <button
+              <div
                 key={rcwd}
-                onClick={() => {
-                  onCwdChange(rcwd);
-                  setCustomPathOpen(false);
-                  setCustomPathValue("");
-                  setCustomPathError(null);
-                  setCustomPathMissingCwd(null);
-                  setDropdownOpen(false);
-                }}
+                onMouseEnter={() => setHoveredCwd(rcwd)}
+                onMouseLeave={() => setHoveredCwd((h) => (h === rcwd ? null : h))}
                 style={{
                   display: "flex",
                   alignItems: "center",
-                  gap: 7,
                   width: "100%",
-                  padding: "8px 10px",
                   background: rcwd === cwd ? "var(--bg-selected)" : "none",
                   border: "none",
                   borderBottom: "1px solid var(--border)",
-                  color: rcwd === cwd ? "var(--text)" : "var(--text-muted)",
-                  cursor: "pointer",
-                  textAlign: "left",
+                  cursor: "default",
                   fontSize: 11,
                   fontFamily: "var(--font-mono)",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
                 }}
-                title={rcwd}
               >
-                {rcwd === cwd && (
-                  <svg
-                    width="10"
-                    height="10"
-                    viewBox="0 0 10 10"
-                    fill="none"
-                    stroke="var(--accent)"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    style={{ flexShrink: 0 }}
-                  >
-                    <polyline points="1.5 5 4 7.5 8.5 2.5" />
-                  </svg>
-                )}
-                {rcwd !== cwd && <span style={{ width: 10, flexShrink: 0 }} />}
-                <span
-                  style={{
-                    flex: 1,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
+                <button
+                  onClick={() => {
+                    onCwdChange(rcwd);
+                    setCustomPathOpen(false);
+                    setCustomPathValue("");
+                    setCustomPathError(null);
+                    setCustomPathMissingCwd(null);
+                    setDropdownOpen(false);
                   }}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 7,
+                    flex: 1,
+                    minWidth: 0,
+                    padding: "8px 10px",
+                    background: "none",
+                    border: "none",
+                    color: rcwd === cwd ? "var(--text)" : "var(--text-muted)",
+                    cursor: "pointer",
+                    textAlign: "left",
+                    fontSize: 11,
+                    fontFamily: "inherit",
+                    overflow: "hidden",
+                  }}
+                  title={rcwd}
                 >
-                  {shortenCwd(rcwd, homeDir)}
-                </span>
-              </button>
+                  {rcwd === cwd && (
+                    <svg
+                      width="10"
+                      height="10"
+                      viewBox="0 0 10 10"
+                      fill="none"
+                      stroke="var(--accent)"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      style={{ flexShrink: 0 }}
+                    >
+                      <polyline points="1.5 5 4 7.5 8.5 2.5" />
+                    </svg>
+                  )}
+                  {rcwd !== cwd && <span style={{ width: 10, flexShrink: 0 }} />}
+                  <span
+                    style={{
+                      flex: 1,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {shortenCwd(rcwd, homeDir)}
+                  </span>
+                </button>
+
+                {/* Delete button — visible on hover */}
+                {hoveredCwd === rcwd && deletingCwd !== rcwd && (
+                  <div style={{ flexShrink: 0, paddingRight: 4 }}>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void handleDeleteCwd(rcwd);
+                      }}
+                      title={`删除工作区 ${rcwd}`}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        width: 24,
+                        height: 24,
+                        padding: 0,
+                        background: "none",
+                        border: "none",
+                        borderRadius: 5,
+                        color: "#ef4444",
+                        cursor: "pointer",
+                        flexShrink: 0,
+                        transition:
+                          "background 0.12s",
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background =
+                          "rgba(239,68,68,0.1)";
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = "none";
+                      }}
+                    >
+                      <svg
+                        width="13"
+                        height="13"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        style={{ display: "block" }}
+                      >
+                        <polyline points="3 6 5 6 21 6" />
+                        <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                        <path d="M10 11v6M14 11v6" />
+                        <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                      </svg>
+                    </button>
+                  </div>
+                )}
+
+                {/* Loading indicator while deleting */}
+                {deletingCwd === rcwd && (
+                  <span
+                    style={{
+                      flexShrink: 0,
+                      paddingRight: 14,
+                      fontSize: 11,
+                      color: "var(--text-dim)",
+                    }}
+                  >
+                    …
+                  </span>
+                )}
+              </div>
             ))}
 
             {/* Default cwd shortcut */}

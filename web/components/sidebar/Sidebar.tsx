@@ -144,6 +144,20 @@ export function Sidebar({
     [onSessionDeleted],
   );
 
+  const handleDeleteCwd = useCallback(
+    async (deletedCwd: string) => {
+      try {
+        const res = await fetch("/api/sessions");
+        const data = (await res.json()) as { sessions: SessionInfo[] };
+        setAllSessions(data.sessions);
+        setSessionsLoading(false);
+      } catch (err) {
+        console.error("Failed to reload sessions after cwd delete:", err);
+      }
+    },
+    [],
+  );
+
   // ── Render ────────────────────────────────────────────────────
   return (
     <div
@@ -163,6 +177,7 @@ export function Sidebar({
         onCwdChange={handleCwdChange}
         allSessions={allSessions}
         sessionsLoading={sessionsLoading}
+        onDeleteCwd={handleDeleteCwd}
       />
 
       {/* 3. Sessions management (collapsible, upward collapse) */}
