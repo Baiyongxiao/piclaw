@@ -141,6 +141,10 @@ export function AppShell() {
   const handleSelectSession = useCallback((session: SessionInfo, isRestore = false) => {
     setNewSessionCwd(null);
     setSelectedSession(session);
+    // Keep activeCwd in sync with the selected session's cwd so the sidebar
+    // workspace picker and session filter reflect the right project directory,
+    // even when the session belongs to a different cwd than the current picker.
+    setActiveCwd(session.cwd);
     setSessionKey((k) => k + 1);
     setSystemPrompt(null);
     setInitialSessionRestored(true);
@@ -171,6 +175,7 @@ export function AppShell() {
   const handleSessionCreated = useCallback((session: SessionInfo) => {
     setNewSessionCwd(null);
     setSelectedSession(session);
+    setActiveCwd(session.cwd);
     setRefreshKey((k) => k + 1);
     router.replace(`?session=${encodeURIComponent(session.id)}`, { scroll: false });
   }, [router]);
@@ -250,7 +255,7 @@ export function AppShell() {
       onSelectSession={handleSelectSession}
       onNewSession={handleNewSession}
       onSessionDeleted={handleSessionDeleted}
-      selectedCwd={selectedSession?.cwd ?? newSessionCwd ?? null}
+      selectedCwd={activeCwd ?? selectedSession?.cwd ?? newSessionCwd ?? null}
       onCwdChange={handleCwdChange}
       onOpenFile={handleOpenFile}
       explorerRefreshKey={explorerRefreshKey}
