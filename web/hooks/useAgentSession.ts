@@ -86,6 +86,74 @@ const PROGRAMMATIC_SCROLL_IGNORE_MS = 700;
 const USER_SCROLL_INTENT_MS = 1200;
 const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " ", "Space", "Spacebar"]);
 
+/**
+ * Decide how to merge an incoming finalized message (from a `message_end` SSE
+ * event) with the current `messages` array.
+ *
+ * A delayed `message_end` can arrive AFTER the message list was already
+ * refreshed from the server (e.g. by stall-detection polling or SSE-reconnect
+ * cleanup calling loadSession/loadSessionFull). In that case the finalized
+ * message is already present in `messages`, and blindly appending it again
+ * would render it duplicated until a page refresh.
+ *
+ * At the same time, the in-memory copy from the server could be stale or
+ * truncated (e.g. read mid-write), while the SSE copy is the authoritative
+ * finalized version. So when the two share an identity but differ in content,
+ * we REPLACE the last message instead of discarding the incoming one.
+ *
+ * Returns:
+ *   - "skip"    : last message is already identical to incoming → do nothing.
+ *   - "replace" : last message has same identity but different content →
+ *                 overwrite it with the (more complete) incoming message.
+ *   - "append"  : different message → push incoming onto the list.
+ */
+type MergeDecision = "skip" | "replace" | "append";
+function mergeFinalMessage(prev: AgentMessage[], incoming: AgentMessage): MergeDecision {
+  if (prev.length === 0) return "append";
+  const last = prev[prev.length - 1];
+  if (last.role !== incoming.role) return "append";
+
+  // Identity: same finalized message instance.
+  // Both sides must have a matching identity key for us to conclude they
+  // represent the same database entry.  If a required field is absent we
+  // conservatively treat them as different ("append") to avoid data loss.
+  let sameIdentity = false;
+  if (incoming.role === "toolResult" && last.role === "toolResult") {
+    // toolCallId is always present and globally unique.
+    sameIdentity = last.toolCallId === incoming.toolCallId;
+  } else if (incoming.role === "assistant" && last.role === "assistant") {
+    // timestamp is set by every AI provider (OpenAI, Anthropic, etc.) but
+    // typed as optional; require it on both sides to confirm identity.
+    const tsOk =
+      last.timestamp !== undefined &&
+      incoming.timestamp !== undefined &&
+      last.timestamp === incoming.timestamp;
+    sameIdentity = tsOk && last.model === incoming.model;
+  } else if (incoming.role === "user" && last.role === "user") {
+    sameIdentity =
+      last.timestamp !== undefined &&
+      incoming.timestamp !== undefined &&
+      last.timestamp === incoming.timestamp;
+  }
+  if (!sameIdentity) return "append";
+
+  // Same identity → compare content. If identical, skip; otherwise replace
+  // so the more complete incoming copy wins without duplicating the entry.
+  // We use JSON.stringify because content blocks are plain JSON-serializable
+  // objects (text/thinking strings, image base64, toolCall JSON).  The try
+  // guard is a safety net for non-serializable toolCall input from third-
+  // party providers.
+  let sameContent = false;
+  try {
+    sameContent = JSON.stringify(last.content) === JSON.stringify(incoming.content);
+  } catch {
+    // Non-serialisable content — be conservative: treat as different so
+    // the more authoritative incoming copy takes over.
+    sameContent = false;
+  }
+  return sameContent ? "skip" : "replace";
+}
+
 function readCompactResult(result: unknown, reason: string): CompactResultInfo | null {
   if (!result || typeof result !== "object") return null;
   const r = result as CompactCommandResult;
@@ -439,7 +507,22 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       case "message_end": {
         const completed = event.message as AgentMessage | undefined;
         if (completed && completed.role !== "user") {
-          setMessages((prev) => [...prev, normalizeToolCalls(completed)]);
+          const normalized = normalizeToolCalls(completed);
+          // Guard against duplicate appends when a delayed event arrives after
+          // the server already refreshed `messages` (stall-detection / reconnect).
+          // If the last message is the same finalized instance, skip or replace
+          // it (replace keeps the more complete incoming content) instead of
+          // pushing a duplicate copy.
+          setMessages((prev) => {
+            const decision = mergeFinalMessage(prev, normalized);
+            if (decision === "skip") return prev;
+            if (decision === "replace") {
+              const next = prev.slice();
+              next[next.length - 1] = normalized;
+              return next;
+            }
+            return [...prev, normalized];
+          });
         }
         dispatch({ type: "reset" });
         setAgentPhase({ kind: "waiting_model" });
@@ -925,8 +1008,14 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           .then((d) => {
             if (!d?.state?.isStreaming && agentRunningRef.current) {
               // Agent stopped but we missed the agent_end event — clean up.
-              // Reset streamState so the stale streamingMessage doesn't keep
-              // rendering and duplicate the finalized message in `messages`.
+              // Close SSE FIRST so any message_end/agent_end events still
+              // queued in the stream don't arrive after loadSessionFull()
+              // replaces `messages` and append the same message again (which
+              // would render duplicated until a page refresh).
+              if (eventSourceRef.current) {
+                eventSourceRef.current.close();
+                eventSourceRef.current = null;
+              }
               setAgentRunning(false);
               setAgentPhase(null);
               dispatch({ type: "end" });
