@@ -5,7 +5,7 @@ import os from "os";
 import { execFile } from "child_process";
 import { getAllowedRoots, isPathAllowed, IGNORED_NAMES, IGNORED_SUFFIXES, normalizeSlashes, isWindowsAbsolutePath } from "@/lib/file-access";
 
-const TEXT_PREVIEW_MAX_BYTES = 256 * 1024;
+const TEXT_PREVIEW_MAX_BYTES = 10 * 1024 * 1024;
 const IMAGE_PREVIEW_MAX_BYTES = 10 * 1024 * 1024;
 const OFFICE_PDF_PREVIEW_MAX_BYTES = 50 * 1024 * 1024;
 
@@ -260,7 +260,7 @@ export async function GET(
         return streamFile(filePath, stat, documentMime, request.headers.get("range"));
       }
       if (stat.size > TEXT_PREVIEW_MAX_BYTES) {
-        return NextResponse.json({ error: "File too large for preview (>256KB)" }, { status: 413 });
+        return NextResponse.json({ error: "File too large for preview (>10MB)" }, { status: 413 });
       }
       const content = fs.readFileSync(filePath, "utf-8");
       const language = getLanguage(filePath);
