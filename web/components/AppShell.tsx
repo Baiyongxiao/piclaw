@@ -100,6 +100,7 @@ export function AppShell() {
   const [fileTabs, setFileTabs] = useState<Tab[]>([]);
   const [activeFileTabId, setActiveFileTabId] = useState<string | null>(null);
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
+  const [fullscreenFileTabId, setFullscreenFileTabId] = useState<string | null>(null);
 
   const handleAtMention = useCallback((relativePath: string) => {
     chatInputRef.current?.insertText("`" + relativePath + "`");
@@ -636,31 +637,37 @@ export function AppShell() {
         </div>
       </div>
 
-      {/* Right panel: file viewer — always mounted, width animated via CSS */}
+      {/* Right panel: file viewer — always mounted, width animated via CSS.
+          On fullscreen, the entire container expands to cover the viewport so the
+          same FileViewer instances are reused (no re-fetch). */}
       <div
-        className={`right-panel-container${rightPanelOpen ? " right-panel-open" : " right-panel-closed"}`}
+        className={`right-panel-container${rightPanelOpen ? " right-panel-open" : " right-panel-closed"}${fullscreenFileTabId ? " right-panel-fullscreen" : ""}`}
         style={{
           display: "flex",
           flexDirection: "column",
-          borderLeft: "1px solid var(--border)",
+          borderLeft: fullscreenFileTabId ? "none" : "1px solid var(--border)",
           background: "var(--bg)",
+          ...(fullscreenFileTabId ? { position: "fixed", inset: 0, zIndex: 9999, width: "100%", minWidth: 0 } : {}),
         }}
       >
-        {/* Right panel tab bar */}
-        <div style={{ display: "flex", alignItems: "center", flexShrink: 0, background: "var(--bg-panel)", borderBottom: "1px solid var(--border)", height: 36 }}>
-          <div style={{ flex: 1, overflow: "hidden" }}>
-            <TabBar
-              tabs={fileTabs}
-              activeTabId={activeFileTabId ?? ""}
-              onSelectTab={setActiveFileTabId}
-              onCloseTab={handleCloseFileTab}
-            />
-          </div>
-          {/* Mobile close button for right panel */}
-          {isMobile && (
+        {fullscreenFileTabId ? (
+          /* ── Fullscreen header ── */
+          <div style={{ display: "flex", alignItems: "center", flexShrink: 0, background: "var(--bg-panel)", borderBottom: "1px solid var(--border)", height: 36 }}>
+            <div style={{
+              flex: 1,
+              overflow: "hidden",
+              paddingLeft: 12,
+              fontSize: 12,
+              color: "var(--text-muted)",
+              whiteSpace: "nowrap",
+              textOverflow: "ellipsis",
+              fontFamily: "var(--font-mono)",
+            }}>
+              {fileTabs.find((t) => t.id === fullscreenFileTabId)?.filePath ?? ""}
+            </div>
             <button
-              onClick={() => setRightPanelOpen(false)}
-              title="Close panel"
+              onClick={() => setFullscreenFileTabId(null)}
+              title="Exit fullscreen"
               style={{
                 display: "flex", alignItems: "center", justifyContent: "center",
                 width: 36, height: 36, padding: 0,
@@ -670,13 +677,69 @@ export function AppShell() {
               onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
               onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; }}
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-                <line x1="18" y1="6" x2="6" y2="18" />
-                <line x1="6" y1="6" x2="18" y2="18" />
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="4 14 10 14 10 20" />
+                <polyline points="20 10 14 10 14 4" />
+                <line x1="14" y1="10" x2="21" y2="3" />
+                <line x1="3" y1="21" x2="10" y2="14" />
               </svg>
             </button>
-          )}
-        </div>
+          </div>
+        ) : (
+          /* ── Normal header: TabBar + fullscreen/mobile buttons ── */
+          <div style={{ display: "flex", alignItems: "center", flexShrink: 0, background: "var(--bg-panel)", borderBottom: "1px solid var(--border)", height: 36 }}>
+            <div style={{ flex: 1, overflow: "hidden" }}>
+              <TabBar
+                tabs={fileTabs}
+                activeTabId={activeFileTabId ?? ""}
+                onSelectTab={setActiveFileTabId}
+                onCloseTab={handleCloseFileTab}
+              />
+            </div>
+            {/* Fullscreen button — desktop only */}
+            {!isMobile && activeFileTabId && (
+              <button
+                onClick={() => setFullscreenFileTabId(activeFileTabId)}
+                title="Fullscreen"
+                style={{
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  width: 36, height: 36, padding: 0,
+                  background: "none", border: "none", borderLeft: "1px solid var(--border)",
+                  color: "var(--text-muted)", cursor: "pointer", flexShrink: 0,
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="15 3 21 3 21 9" />
+                  <polyline points="9 21 3 21 3 15" />
+                  <line x1="21" y1="3" x2="14" y2="10" />
+                  <line x1="3" y1="21" x2="10" y2="14" />
+                </svg>
+              </button>
+            )}
+            {/* Mobile close button for right panel */}
+            {isMobile && (
+              <button
+                onClick={() => setRightPanelOpen(false)}
+                title="Close panel"
+                style={{
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  width: 36, height: 36, padding: 0,
+                  background: "none", border: "none", borderLeft: "1px solid var(--border)",
+                  color: "var(--text-muted)", cursor: "pointer", flexShrink: 0,
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            )}
+          </div>
+        )}
 
         {/* File content — keep all opened tabs mounted, toggle visibility only.
             This prevents remounting (and re-fetching) when switching back to a
@@ -703,18 +766,18 @@ export function AppShell() {
         </div>
       </div>
     </div>
-    {/* File panel toggle — always visible at top-right (hidden when mobile right panel is open) */}
-    {(!isMobile || !rightPanelOpen) && (
+    {/* File panel toggle — always visible at top-right (moves left when panel is open on desktop; hidden during fullscreen) */}
+    {!fullscreenFileTabId && (!isMobile || !rightPanelOpen) && (
     <button
       onClick={() => setRightPanelOpen((v) => !v)}
       title={rightPanelOpen ? "Hide file panel" : "Show file panel"}
       style={{
-        position: "fixed", top: 0, right: 0, zIndex: 300,
+        position: "fixed", top: 0, right: rightPanelOpen ? "calc(42% - 1px)" : 0, zIndex: rightPanelOpen ? 301 : 300,
         display: "flex", alignItems: "center", justifyContent: "center",
         width: 36, height: 36, padding: 0,
         background: "var(--bg-panel)", border: "none", borderLeft: "1px solid var(--border)", borderBottom: "1px solid var(--border)",
         color: rightPanelOpen ? "var(--text)" : "var(--text-muted)",
-        cursor: "pointer", transition: "color 0.12s",
+        cursor: "pointer", transition: "right 0.2s ease, color 0.12s",
       }}
       onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
       onMouseLeave={(e) => { e.currentTarget.style.color = rightPanelOpen ? "var(--text)" : "var(--text-muted)"; }}
@@ -728,6 +791,7 @@ export function AppShell() {
     {skillsConfigOpen && (activeCwd ?? selectedSession?.cwd ?? newSessionCwd) && (
       <SkillsConfig cwd={(activeCwd ?? selectedSession?.cwd ?? newSessionCwd)!} onClose={() => setSkillsConfigOpen(false)} />
     )}
+
     </>
   );
 }

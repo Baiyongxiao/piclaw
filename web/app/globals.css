@@ -334,6 +334,17 @@ span.linenumber {
     width: 42vw;
     min-width: 300px;
   }
+
+  /* Fullscreen: override width to cover the viewport */
+  .right-panel-container.right-panel-fullscreen {
+    width: 100% !important;
+    min-width: 0 !important;
+    transition: none;
+  }
+  .right-panel-container.right-panel-fullscreen > * {
+    width: 100%;
+    min-width: 0;
+  }
 }
 
 /* ── Mobile (≤ 640px) ───────────────────────────────────────────── */
