@@ -269,6 +269,7 @@ export {
 	type Skill,
 	type SkillFrontmatter,
 } from "./core/skills.ts";
+export { buildPlanSystemPrompt } from "./core/system-prompt.ts";
 export { createSyntheticSourceInfo } from "./core/source-info.ts";
 export { type EditDiffResult, generateDiffString, generateUnifiedPatch } from "./core/tools/edit-diff.ts";
 // Tools

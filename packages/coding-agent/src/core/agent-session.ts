@@ -853,6 +853,22 @@ export class AgentSession {
 		this.agent.state.systemPrompt = this._systemPromptOverride ?? this._baseSystemPrompt;
 	}
 
+	/** Base system prompt options used for prompt rebuilding (exposed for plan-mode use). */
+	get baseSystemPromptOptions(): BuildSystemPromptOptions {
+		return this._baseSystemPromptOptions;
+	}
+
+	/**
+	 * Override the base system prompt and persist it across agent turns.
+	 * Used by the web layer's Plan mode (rebuildPlanSystemPrompt) to prevent
+	 * _runAgentPrompt from resetting to the act-mode prompt.
+	 */
+	setPlanBaseSystemPrompt(prompt: string): void {
+		this._baseSystemPrompt = prompt;
+		this._systemPromptOverride = undefined;
+		this.agent.state.systemPrompt = prompt;
+	}
+
 	/** Whether compaction or branch summarization is currently running */
 	get isCompacting(): boolean {
 		return (

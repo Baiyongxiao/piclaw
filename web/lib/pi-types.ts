@@ -1,4 +1,4 @@
-import type { SessionManager, SettingsManager, AgentSessionEvent } from "@piclaw/coding-agent";
+import type { SessionManager, SettingsManager, AgentSessionEvent, BuildSystemPromptOptions } from "@piclaw/coding-agent";
 
 export interface ContextUsage {
   percent: number | null;
@@ -34,6 +34,8 @@ export interface AgentSessionLike {
   readonly sessionManager: SessionManager;
   readonly settingsManager: SettingsManager;
   readonly agent: { state: { systemPrompt?: string; thinkingLevel?: string } };
+  readonly baseSystemPromptOptions?: BuildSystemPromptOptions;
+  setPlanBaseSystemPrompt(prompt: string): void;
 
   subscribe(listener: (event: AgentSessionEvent) => void): () => void;
   prompt(text: string, options?: { images?: Array<{ type: "image"; data: string; mimeType: string }> }): Promise<void>;

@@ -22,6 +22,8 @@ export interface BuildSystemPromptOptions {
 	contextFiles?: Array<{ path: string; content: string }>;
 	/** Pre-loaded skills. */
 	skills?: Skill[];
+	/** Agent mode: act (default) or plan (read-only planning/research). */
+	mode?: "act" | "plan";
 }
 
 /** Build the system prompt with tools, guidelines, and context */
@@ -35,6 +37,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 		cwd,
 		contextFiles: providedContextFiles,
 		skills: providedSkills,
+		mode = "act",
 	} = options;
 	const resolvedCwd = cwd;
 	const promptCwd = resolvedCwd.replace(/\\/g, "/");
@@ -50,7 +53,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 	const contextFiles = providedContextFiles ?? [];
 	const skills = providedSkills ?? [];
 
-	if (customPrompt) {
+	if (customPrompt && mode !== "plan") {
 		let prompt = customPrompt;
 
 		if (appendSection) {
@@ -125,17 +128,38 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 	addGuideline("Be concise in your responses");
 	addGuideline("Show file paths clearly when working with files");
 
-	const guidelines = guidelinesList.map((g) => `- ${g}`).join("\n");
+	const isPlan = mode === "plan";
 
-	let prompt = `You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.
+	// Plan mode: completely different agent identity — planning/research, NOT coding.
+	// This follows OpenCode's approach of separate system prompts per mode.
+	const intro = isPlan
+		? `You are an expert planning and research assistant operating inside pi, a coding agent harness. Your role is to analyze codebases, investigate problems, and produce detailed implementation plans. You have READ-ONLY access — you CANNOT edit, write, or modify any files. When asked to implement something, output a concrete numbered plan under "## Plan". Do NOT execute the plan yourself — wait for the user to switch to Act mode.`
+		: `You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.`;
+
+	const planGuidelines = isPlan
+		? [
+				"Do NOT attempt to edit, write, or modify any files — you are in read-only planning mode.",
+				"When asked for work, output a concrete numbered plan under \"## Plan\" with clear steps.",
+				"Do NOT execute the plan yourself. Wait for the user to switch to Act mode.",
+				"Use available tools to explore and understand the codebase before planning.",
+				"Read relevant files thoroughly before making recommendations.",
+				"If a task is ambiguous, ask clarifying questions before planning.",
+		  ]
+		: [];
+
+	const allGuidelines = [...planGuidelines, ...guidelinesList].map((g) => `- ${g}`).join("\n");
+
+	const customToolsNote = isPlan
+		? ""
+		: "\n\nIn addition to the tools above, you may have access to other custom tools depending on the project.";
+
+	let prompt = `${intro}
 
 Available tools:
-${toolsList}
-
-In addition to the tools above, you may have access to other custom tools depending on the project.
+${toolsList}${customToolsNote}
 
 Guidelines:
-${guidelines}
+${allGuidelines}
 
 Pi documentation (read only when the user asks about pi itself, its SDK, extensions, themes, skills, or TUI):
 - Main documentation: ${readmePath}
@@ -170,4 +194,9 @@ Pi documentation (read only when the user asks about pi itself, its SDK, extensi
 	prompt += `\nCurrent working directory: ${promptCwd}`;
 
 	return prompt;
+}
+
+/** Convenience: build a system prompt for Plan mode (read-only planning/research). */
+export function buildPlanSystemPrompt(options: BuildSystemPromptOptions): string {
+	return buildSystemPrompt({ ...options, mode: "plan" });
 }
